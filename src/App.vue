@@ -23,8 +23,9 @@ import AppSidebar from './components/AppSidebar.vue'
 }
 
 .sidebar-container {
-  /* flex: 0 0 20%; 是一种更精确的写法 */
-  width: 20%; /* 设置侧边栏宽度为 1/5 */
+  width: 30%;
+  min-width: min(300px, 50%);
+
   flex-shrink: 0; /* 防止侧边栏在空间不足时被压缩 */
 }
 </style>

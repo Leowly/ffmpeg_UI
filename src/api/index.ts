@@ -8,4 +8,5 @@ export const API_ENDPOINTS = {
   // 文件上传地址
   FILE_UPLOAD: `${API_BASE_URL}/api/upload`,
   FILE_DELETE: (fileId: string) => `${API_BASE_URL}/api/delete-file/${fileId}`,
+  FILE_LIST: `${API_BASE_URL}/api/files`,
 }
