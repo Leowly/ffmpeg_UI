@@ -1,8 +1,6 @@
 <!-- src/components/AppSidebar.vue -->
 <template>
   <div class="app-sidebar">
-    <h2>文件管理</h2>
-
     <a-upload-dragger
       v-model:file-list="fileList"
       name="file"
@@ -24,8 +22,8 @@
     <a-list item-layout="horizontal" :data-source="fileList" class="file-list-container">
       <template #renderItem="{ item }">
         <a-list-item
-          :class="{ 'file-selected': item.uid === selectedFileUid }"
-          @click="selectFile(item.uid)"
+          :class="{ 'list-item-selected': item.uid === fileStore.selectedFileId }"
+          @click="handleFileSelect(item.uid)"
         >
           <a-list-item-meta>
             <template #title>
@@ -52,104 +50,121 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
+import { ref, onMounted } from 'vue'
+import { message } from 'ant-design-vue'
 // 移除了未使用的 UploadOutlined
-import { DeleteOutlined, InboxOutlined } from '@ant-design/icons-vue';
-import axios from 'axios';
-import { API_ENDPOINTS } from '@/api/index';
+import { DeleteOutlined, InboxOutlined } from '@ant-design/icons-vue'
+import axios from 'axios'
+import { API_ENDPOINTS } from '@/api/index'
+import { useFileStore } from '@/stores/fileStore' // 👈 1. 导入 store
 
-import type { UploadFile as AntdUploadFile, UploadChangeParam } from 'ant-design-vue';
+const fileStore = useFileStore()
+import type { UploadFile as AntdUploadFile, UploadChangeParam } from 'ant-design-vue'
 
 interface MyUploadFile extends AntdUploadFile {
-  id?: string;
+  id?: string
 }
 
-const fileList = ref<MyUploadFile[]>([]);
-const selectedFileUid = ref<string | null>(null);
+const fileList = ref<MyUploadFile[]>([])
+const selectedFileUid = ref<string | null>(null)
 
-// 简化后的 handleChange 函数
 const handleChange = (info: UploadChangeParam) => {
-  // 关键：在 'done' 状态时，用 info.file（包含 response） 替换掉 info.fileList 中对应的旧文件对象
+  // 1. 保留你现有的成功/失败提示逻辑
   if (info.file.status === 'done') {
-    const targetFile = info.fileList.find(file => file.uid === info.file.uid);
-    if (targetFile) {
-      // 将后端返回的 id 附加到文件对象上
-      (targetFile as MyUploadFile).id = info.file.response?.file_id;
+    message.success(`${info.file.name} 文件上传成功`);
+    const serverResponse = info.file.response;
+    if (serverResponse) {
+      // 这里的 uid 更新非常重要，它保证了即使在刷新前，
+      // 新上传的文件也能被正确地选中或删除。
+      info.file.uid = serverResponse.file_id;
     }
-    message.success(`${info.file.name} 文件上传成功.`);
   } else if (info.file.status === 'error') {
-    message.error(`${info.file.name} 文件上传失败.`);
+    const errorMsg = info.file.response?.error || '上传失败';
+    message.error(`${info.file.name} 文件上传失败: ${errorMsg}`);
   }
 
-  // 无论如何，都用最新的 fileList 更新我们的 ref
-  fileList.value = info.fileList;
-};
+  // 2. 检查这是否是最后一个正在上传的文件
+  // 当一个文件变为 'done' 或 'error' 时，我们检查列表里是否还有其他文件处于 'uploading' 状态
+  if (info.file.status === 'done' || info.file.status === 'error') {
+    // 使用 .some() 检查是否还存在正在上传的文件
+    const isStillUploading = fileList.value.some(file => file.status === 'uploading');
 
+    // 如果没有任何文件在上传了，说明整批任务已结束
+    if (!isStillUploading) {
+      console.log("所有文件上传完毕，准备从服务器同步最新列表...");
+      // 在这里安全地调用 fetchUserFiles，进行最终同步
+      fetchUserFiles();
+    }
+  }
+};
 onMounted(() => {
-  fetchUserFiles();
-});
+  fetchUserFiles()
+})
 
 const fetchUserFiles = async () => {
   try {
-    const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST);
-    fileList.value = response.data;
+    const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST)
+    fileList.value = response.data
     // 移除了成功的消息提示，保持界面安静
   } catch (error) {
-    console.error("获取文件列表失败:", error);
+    console.error('获取文件列表失败:', error)
     // 只在失败时提示用户
-    message.error('同步文件列表失败，请刷新页面重试');
+    message.error('同步文件列表失败，请刷新页面重试')
   }
-};
+}
 
 const beforeUpload = (file: AntdUploadFile) => {
-  const isVideoOrAudio = file.type?.startsWith('video/') || file.type?.startsWith('audio/');
+  const isVideoOrAudio = file.type?.startsWith('video/') || file.type?.startsWith('audio/')
   if (!isVideoOrAudio) {
-    message.error('只能上传视频或音频文件!');
-    return false;
+    message.error('只能上传视频或音频文件!')
+    return false
   }
-  const isLt4G = file.size ? file.size / 1024 / 1024 / 1024 < 4 : true;
+  const isLt4G = file.size ? file.size / 1024 / 1024 / 1024 < 4 : true
   if (!isLt4G) {
-    message.error('文件大小不能超过 4GB!');
-    return false;
+    message.error('文件大小不能超过 4GB!')
+    return false
   }
-  return true;
-};
-
-const selectFile = (uid: string) => {
-  selectedFileUid.value = uid;
-};
+  return true
+}
 
 const removeFile = async (uid: string) => {
-  const fileToRemove = fileList.value.find(file => file.uid === uid);
-  if (!fileToRemove) return;
+  const fileToRemove = fileList.value.find((file) => file.uid === uid)
+  if (!fileToRemove) return
 
-  const file_id = fileToRemove.response?.file_id || fileToRemove.id;
+  const file_id = fileToRemove.response?.file_id || fileToRemove.id
 
   // 如果文件从未上传成功（没有 file_id），则直接从前端移除
   if (!file_id) {
-    updateFrontendFileList(uid);
-    message.success('文件已从列表移除');
-    return;
+    updateFrontendFileList(uid)
+    message.success('文件已从列表移除')
+    return
   }
 
   // 如果有 file_id，则调用后端 API
   try {
-    await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id));
-    updateFrontendFileList(uid);
-    message.success('文件已从服务器和列表移除');
+    await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id))
+    updateFrontendFileList(uid)
+    message.success('文件已从服务器和列表移除')
   } catch (error) {
-    console.error("删除文件失败:", error);
-    message.error('从服务器删除文件失败，请重试');
+    console.error('删除文件失败:', error)
+    message.error('从服务器删除文件失败，请重试')
   }
-};
+}
 
 const updateFrontendFileList = (uid: string) => {
-  fileList.value = fileList.value.filter(file => file.uid !== uid);
+  fileList.value = fileList.value.filter((file) => file.uid !== uid)
   if (selectedFileUid.value === uid) {
-    selectedFileUid.value = null;
+    selectedFileUid.value = null
   }
-};
+}
+const handleFileSelect = (fileId: string) => {
+  // 如果点击的是已经选中的文件，则取消选中
+  if (fileStore.selectedFileId === fileId) {
+    fileStore.selectFile(null)
+  } else {
+    fileStore.selectFile(fileId)
+  }
+}
 </script>
 
 <style scoped>
@@ -205,9 +220,25 @@ const updateFrontendFileList = (uid: string) => {
 .file-list-container .ant-list-item:hover {
   background-color: #f0f2f5;
 }
-.file-list-container .ant-list-item.file-selected {
-  background-color: #e6f7ff;
-  border-left: 3px solid #1890ff;
-  padding-left: 17px;
+
+.list-item-selected {
+  background-color: #e6f7ff; /* Ant Design 的主题蓝色浅色变体 */
+  border-left: 3px solid #1890ff; /* 左侧蓝色边框 */
+}
+
+@media (max-width: 768px) {
+  /* 直接隐藏图标 */
+  :deep(.upload-area .ant-upload-drag-icon) {
+    display: none;
+  }
+
+  /* 让文字居中 */
+  :deep(.upload-area .ant-upload-text) {
+    text-align: center;
+  }
+
+  :deep(.upload-area.ant-upload-drag) {
+    padding: 0px 0; /* 从 12px 减小到 8px，或者你觉得合适的任何值 */
+  }
 }
 </style>

@@ -60,28 +60,28 @@ def before_request_func():
     get_session_id()
     update_session_activity()
 
+# backend/app.py
+
 @app.route('/api/files', methods=['GET'])
 def list_files():
-    """列出当前用户的所有文件"""
     user_id = session['user_id']
-    print(f"--- Received request for user_id: {user_id} ---") # 打印 session id
     user_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_id)
-    print(f"--- Checking folder: {user_folder} ---") # 打印检查的文件夹路径
     
     if not os.path.exists(user_folder):
-        return jsonify([]) # 如果文件夹不存在，返回空列表
+        return jsonify([])
 
     files_info = []
     for filename in os.listdir(user_folder):
         file_path = os.path.join(user_folder, filename)
-        file_id = os.path.splitext(filename)[0]
+        # 现在文件名本身就是唯一 ID 和显示名称
+        file_id = filename
+        
         files_info.append({
-            "uid": file_id, # 使用文件ID作为 uid
+            "uid": file_id, # 直接使用文件名
             "id": file_id,
-            "name": filename,
+            "name": filename, # 直接使用文件名
             "status": "done",
             "size": os.path.getsize(file_path),
-            # 为了方便前端，构建一个 response 对象
             "response": {
                 "file_id": file_id,
                 "original_name": filename,
@@ -90,58 +90,58 @@ def list_files():
         })
     return jsonify(files_info)
 
-# backend/app.py
+def find_unique_filename(folder, filename):
+    """
+    检查文件名是否存在，如果存在，则在文件名后添加 (1), (2)...
+    """
+    # 拆分文件名和扩展名，例如 "video.mp4" -> ("video", ".mp4")
+    base, extension = os.path.splitext(filename)
+    counter = 1
+    # 构造完整路径
+    unique_filename = filename
+    save_path = os.path.join(folder, unique_filename)
+    
+    # 循环直到找到一个不存在的路径
+    while os.path.exists(save_path):
+        unique_filename = f"{base} ({counter}){extension}"
+        save_path = os.path.join(folder, unique_filename)
+        counter += 1
+        
+    return unique_filename, save_path
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     user_id = session['user_id']
     user_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_id)
     
-    # --- 添加日志 ---
-    print(f"--- Upload request for user_id: {user_id} ---")
-    print(f"--- Target folder: {user_folder} ---")
-    
     if not os.path.exists(user_folder):
-        try:
-            os.makedirs(user_folder)
-            print(f"--- Created user folder: {user_folder} ---")
-        except Exception as e:
-            print(f"!!! ERROR: Failed to create user folder: {e} !!!")
-            return jsonify({"error": f"Server error: cannot create directory for user {user_id}"}), 500
+        os.makedirs(user_folder)
 
     if 'file' not in request.files:
-        print("!!! ERROR: 'file' part not in request.files !!!")
         return jsonify({"error": "No file part in the request"}), 400
-        
-    file = request.files['file']
     
+    file = request.files['file']
     if file.filename == '':
-        print("!!! ERROR: No file selected (filename is empty) !!!")
         return jsonify({"error": "No selected file"}), 400
 
     if file:
         original_filename = secure_filename(file.filename)
-        file_extension = os.path.splitext(original_filename)[1]
-        unique_id = str(uuid.uuid4())
-        unique_filename = unique_id + file_extension
-        save_path = os.path.join(user_folder, unique_filename)
         
-        print(f"--- Attempting to save file to: {save_path} ---")
+        # 使用辅助函数来获取一个唯一的文件名和保存路径
+        unique_filename, save_path = find_unique_filename(user_folder, original_filename)
+        
+        print(f"--- Saving file. Original: '{original_filename}', Final: '{unique_filename}' ---")
         
         try:
             file.save(save_path)
-            print(f"--- SUCCESS: File saved to {save_path} ---")
             
-            # 确认文件真的存在
-            if os.path.exists(save_path):
-                print("--- VERIFIED: File exists on disk after saving. ---")
-            else:
-                print("!!! CRITICAL ERROR: File.save() did not raise error, but file does not exist! Check permissions or disk space. !!!")
-
+            # 重要：现在，唯一标识符就是最终的文件名本身
+            file_id = unique_filename
+            
             response_data = {
                 "msg": "Upload successful",
-                "file_id": unique_id,
-                "original_name": original_filename,
+                "file_id": file_id, # 返回最终的文件名作为 ID
+                "original_name": file_id, # original_name 也是最终的文件名
                 "temp_path": save_path
             }
             return jsonify(response_data), 200
@@ -149,28 +149,31 @@ def upload_file():
             print(f"!!! ERROR: file.save() failed with exception: {e} !!!")
             return jsonify({"error": f"Server error: failed to save file. Exception: {e}"}), 500
 
-    print("!!! ERROR: Unknown error, request reached end of function without returning. !!!")
     return jsonify({"error": "File upload failed due to an unknown server error"}), 500
 
-@app.route('/api/delete-file/<file_id>', methods=['DELETE'])
-def delete_file(file_id):
+# backend/app.py
+
+# 👇 重要：将 <file_id> 改为 <path:file_id> 以支持带点的文件名
+@app.route('/api/delete-file', methods=['DELETE'])
+def delete_file():
+    # 👇 核心修改 2: 从请求的查询参数中获取文件名
+    file_id = request.args.get('filename')
+    
     user_id = session['user_id']
     user_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_id)
     
     if not file_id:
-        return jsonify({"error": "File ID is required"}), 400
+        return jsonify({"error": "Filename parameter is required"}), 400
 
+    if os.path.basename(file_id) != file_id:
+        return jsonify({"error": "Invalid filename format (path traversal detected)"}), 400
+    
     try:
-        file_to_delete = None
-        for filename in os.listdir(user_folder):
-            if filename.startswith(file_id):
-                file_to_delete = filename
-                break
+        file_path = os.path.join(user_folder, file_id)
         
-        if file_to_delete:
-            file_path = os.path.join(user_folder, file_to_delete)
+        if os.path.exists(file_path):
             os.remove(file_path)
-            return jsonify({"msg": f"File {file_to_delete} deleted successfully"}), 200
+            return jsonify({"msg": f"File '{file_id}' deleted successfully"}), 200
         else:
             return jsonify({"error": "File not found for this user"}), 404
     except Exception as e:
@@ -225,14 +228,28 @@ def find_file_by_id(user_folder, file_id):
             return os.path.join(user_folder, filename)
     return None
 
-@app.route('/api/file-info/<file_id>', methods=['GET'])
-def get_file_info(file_id):
-    """使用 ffprobe 获取文件的详细元数据"""
+@app.route('/api/file-info', methods=['GET'])
+def get_file_info():
+    # 👇 核心修改 2: 从请求的查询参数中获取文件名
+    file_id = request.args.get('filename')
+
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({"error": "User session not found"}), 401
+    
+    if not file_id:
+        return jsonify({"error": "Filename parameter is required"}), 400
 
     user_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_id)
+
+    if os.path.basename(file_id) != file_id:
+        return jsonify({"error": "Invalid filename format (path traversal detected)"}), 400
+
+    file_path = os.path.join(user_folder, file_id)
+    
+    if not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+    
     file_path = find_file_by_id(user_folder, file_id)
 
     if not file_path:
