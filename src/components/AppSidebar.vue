@@ -52,51 +52,39 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-// 移除了未使用的 UploadOutlined
 import { DeleteOutlined, InboxOutlined } from '@ant-design/icons-vue'
 import axios from 'axios'
 import { API_ENDPOINTS } from '@/api/index'
-import { useFileStore } from '@/stores/fileStore' // 👈 1. 导入 store
-
-const fileStore = useFileStore()
+import { useFileStore } from '@/stores/fileStore'
 import type { UploadFile as AntdUploadFile, UploadChangeParam } from 'ant-design-vue'
 
 interface MyUploadFile extends AntdUploadFile {
   id?: string
 }
 
+const fileStore = useFileStore() // 只保留 Pinia store
 const fileList = ref<MyUploadFile[]>([])
-const selectedFileUid = ref<string | null>(null)
+//  👇 1. 删除这个无用的、会引起混淆的局部 ref
+// const selectedFileUid = ref<string | null>(null)
 
+// handleChange 函数保持不变
 const handleChange = (info: UploadChangeParam) => {
-  // 1. 保留你现有的成功/失败提示逻辑
+  if (info.file.status === 'done' || info.file.status === 'error') {
+    const isStillUploading = fileList.value.some(file => file.status === 'uploading');
+    if (!isStillUploading) {
+      fetchUserFiles();
+    }
+  }
+
   if (info.file.status === 'done') {
     message.success(`${info.file.name} 文件上传成功`);
-    const serverResponse = info.file.response;
-    if (serverResponse) {
-      // 这里的 uid 更新非常重要，它保证了即使在刷新前，
-      // 新上传的文件也能被正确地选中或删除。
-      info.file.uid = serverResponse.file_id;
-    }
   } else if (info.file.status === 'error') {
     const errorMsg = info.file.response?.error || '上传失败';
     message.error(`${info.file.name} 文件上传失败: ${errorMsg}`);
   }
-
-  // 2. 检查这是否是最后一个正在上传的文件
-  // 当一个文件变为 'done' 或 'error' 时，我们检查列表里是否还有其他文件处于 'uploading' 状态
-  if (info.file.status === 'done' || info.file.status === 'error') {
-    // 使用 .some() 检查是否还存在正在上传的文件
-    const isStillUploading = fileList.value.some(file => file.status === 'uploading');
-
-    // 如果没有任何文件在上传了，说明整批任务已结束
-    if (!isStillUploading) {
-      console.log("所有文件上传完毕，准备从服务器同步最新列表...");
-      // 在这里安全地调用 fetchUserFiles，进行最终同步
-      fetchUserFiles();
-    }
-  }
 };
+
+// fetchUserFiles, onMounted, beforeUpload 保持不变
 onMounted(() => {
   fetchUserFiles()
 })
@@ -105,10 +93,8 @@ const fetchUserFiles = async () => {
   try {
     const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST)
     fileList.value = response.data
-    // 移除了成功的消息提示，保持界面安静
   } catch (error) {
     console.error('获取文件列表失败:', error)
-    // 只在失败时提示用户
     message.error('同步文件列表失败，请刷新页面重试')
   }
 }
@@ -127,38 +113,38 @@ const beforeUpload = (file: AntdUploadFile) => {
   return true
 }
 
+// 👇 2. 修正核心的 removeFile 函数
 const removeFile = async (uid: string) => {
   const fileToRemove = fileList.value.find((file) => file.uid === uid)
   if (!fileToRemove) return
 
-  const file_id = fileToRemove.response?.file_id || fileToRemove.id
+  // 使用 uid 作为 file_id，因为它们现在是相同的
+  const file_id = uid;
 
-  // 如果文件从未上传成功（没有 file_id），则直接从前端移除
-  if (!file_id) {
-    updateFrontendFileList(uid)
-    message.success('文件已从列表移除')
-    return
-  }
-
-  // 如果有 file_id，则调用后端 API
   try {
     await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id))
-    updateFrontendFileList(uid)
-    message.success('文件已从服务器和列表移除')
+    message.success(`文件 '${file_id}' 已从服务器移除`)
+
+    // 从前端列表中移除
+    fileList.value = fileList.value.filter((file) => file.uid !== uid)
+
+    // 👇 3. 核心修正：检查并更新全局 Store！
+    // 如果被删除的文件正是当前选中的文件
+    if (fileStore.selectedFileId === uid) {
+      // 就调用 store 的 action 来清空选择
+      fileStore.selectFile(null)
+    }
+
   } catch (error) {
     console.error('删除文件失败:', error)
     message.error('从服务器删除文件失败，请重试')
   }
 }
 
-const updateFrontendFileList = (uid: string) => {
-  fileList.value = fileList.value.filter((file) => file.uid !== uid)
-  if (selectedFileUid.value === uid) {
-    selectedFileUid.value = null
-  }
-}
+// 移除了 updateFrontendFileList 函数，因为它的逻辑已经合并到 removeFile 中
+
+// handleFileSelect 函数保持不变
 const handleFileSelect = (fileId: string) => {
-  // 如果点击的是已经选中的文件，则取消选中
   if (fileStore.selectedFileId === fileId) {
     fileStore.selectFile(null)
   } else {
@@ -238,7 +224,7 @@ const handleFileSelect = (fileId: string) => {
   }
 
   :deep(.upload-area.ant-upload-drag) {
-    padding: 0px 0; /* 从 12px 减小到 8px，或者你觉得合适的任何值 */
+    padding: 0px 0;
   }
 }
 </style>

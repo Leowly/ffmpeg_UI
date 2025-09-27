@@ -30,8 +30,7 @@ import SingleFileWorkspace from './components/SingleFileWorkspace.vue';
 .sidebar {
   width: 350px;
   min-width: 300px;
-  background-color: #fff;
-  border-right: 1px solid #d9d9d9;
+  background-color: #f0f2f5;
   padding: 16px;
   /* 👇 允许侧边栏自身滚动 */
   overflow-y: auto;
@@ -58,7 +57,6 @@ import SingleFileWorkspace from './components/SingleFileWorkspace.vue';
     height: auto;
     max-height: 40vh; /* 例如，最大高度为屏幕的 40% */
     border-right: none; /* 移除右边框 */
-    border-bottom: 1px solid #d9d9d9; /* 添加下边框 */
     min-width: unset; /* 取消最小宽度限制 */
   }
 
