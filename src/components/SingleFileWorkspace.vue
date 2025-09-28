@@ -122,9 +122,24 @@
         </div>
       </div>
 
-      <a-divider />
+      <!-- ======================================================= -->
+      <!-- ============== 新增: 导出功能触发器 =================== -->
+      <!-- ======================================================= -->
+      <a-float-button
+        type="primary"
+        shape="circle"
+        tooltip="导出文件"
+        @click="handleExportClick"
+      >
+        <template #icon><ExportOutlined /></template>
+      </a-float-button>
 
-      <a-divider />
+      <ExportModal
+        v-model:visible="isExportModalVisible"
+        :file-info="fileInfo"
+        :initial-start-time="startTime"
+        :initial-end-time="endTime"
+      />
     </div>
   </div>
 </template>
@@ -135,8 +150,10 @@ import axios, { isAxiosError } from 'axios'
 import { useFileStore } from '@/stores/fileStore'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
+import { ExportOutlined } from '@ant-design/icons-vue'
+import ExportModal from './ExportModal.vue'
 
-// --- 修正: 为 ffprobe 的输出定义类型接口 ---
+// --- 为 ffprobe 的输出定义类型接口 ---
 interface StreamInfo {
   codec_type: 'video' | 'audio'
   width?: number
@@ -151,6 +168,9 @@ interface StreamInfo {
 }
 interface FormatInfo {
   filename: string
+  // --- 👇 这里是关键修复 ---
+  format_name: string; // 添加此属性以匹配 ExportModal 的期望
+  // --- 👆 修复结束 ---
   format_long_name: string
   duration: string
   size: string
@@ -166,37 +186,33 @@ const fileStore = useFileStore()
 
 // --- Reactive State ---
 const isLoading = ref(false)
-// 修正: 使用我们定义的接口代替 'any'
 const fileInfo = ref<FFProbeResult | null>(null)
 const error = ref<string | null>(null)
-// 新增：为滑块创建一个 ref，它是一个包含两个数字的数组
 const trimRange = ref<[number, number]>([0, 0])
+const isExportModalVisible = ref(false)
 
 // --- Operation State ---
 const startTime = ref(0)
 const endTime = ref(0)
 const workspaceRef = ref<HTMLElement | null>(null)
-const descriptionColumns = ref(2) // 默认是 2 列
+const descriptionColumns = ref(2)
 const totalDuration = computed(() => {
   return fileInfo.value ? parseFloat(fileInfo.value.format.duration) : 0
 })
 let observer: ResizeObserver | null = null
 
 watch(fileInfo, (newFileInfo) => {
-  // 步骤 1: 无论如何，先清理旧的观察者
   if (observer) {
     observer.disconnect();
     observer = null;
   }
 
-  // 步骤 2: 根据新数据，立即更新状态
   if (newFileInfo) {
     const duration = parseFloat(newFileInfo.format.duration);
     startTime.value = 0;
     endTime.value = duration;
     trimRange.value = [0, duration];
 
-    // 步骤 3: 在 DOM 更新后，再处理依赖于 DOM 的事情
     nextTick(() => {
       if (workspaceRef.value) {
         observer = new ResizeObserver((entries) => {
@@ -207,14 +223,12 @@ watch(fileInfo, (newFileInfo) => {
       }
     });
   } else {
-    // 新增：当文件被取消选择时 (newFileInfo 为 null)，重置时间状态
     startTime.value = 0;
     endTime.value = 0;
     trimRange.value = [0, 0];
   }
 });
 
-// 's' 的类型现在会被正确推断为 StreamInfo
 const videoStream = computed(() => fileInfo.value?.streams.find((s) => s.codec_type === 'video'))
 const audioStream = computed(() => fileInfo.value?.streams.find((s) => s.codec_type === 'audio'))
 
@@ -224,15 +238,12 @@ const mediaType = computed<'video' | 'audio' | 'unknown'>(() => {
   const vs = videoStream.value
   const as = audioStream.value
 
-  // 规则：如果存在视频流，且不是封面(mjpeg/png)，则判定为视频文件
   if (vs && !['mjpeg', 'png'].includes(vs.codec_name)) {
     return 'video'
   }
-  // 否则，如果存在音频流，则判定为音频文件
   if (as) {
     return 'audio'
   }
-  // 备用情况
   return 'unknown'
 })
 
@@ -242,16 +253,13 @@ const mediaTypeDisplay = computed(() => {
   return '媒体文件'
 })
 
-// 为音频文件单独计算比特率，更精确
 const audioBitrate = computed(() => {
-  // 现在 audioStream.value.bit_rate 不会报错
   if (audioStream.value && audioStream.value.bit_rate) {
     return `${(parseInt(audioStream.value.bit_rate) / 1000).toFixed(0)} kb/s`
   }
   if (audioStream.value && fileInfo.value?.format) {
     const calculatedBps =
       (parseInt(fileInfo.value.format.size) * 8) / parseFloat(fileInfo.value.format.duration)
-    // 如果文件只有一个音频流，这个计算值比较准
     if (
       fileInfo.value.streams.length === 1 ||
       (fileInfo.value.streams.length === 2 && videoStream.value?.codec_name.match(/mjpeg|png/))
@@ -264,10 +272,6 @@ const audioBitrate = computed(() => {
 })
 
 // --- Helper Functions ---
-/**
- * 修正: 安全地计算帧率，替代 eval
- * @param rateString - ffprobe 返回的帧率字符串 (例如 "30000/1001" or "25/1")
- */
 const calculateFrameRate = (rateString: string): number => {
   if (!rateString || !rateString.includes('/')) return 0
   const parts = rateString.split('/')
@@ -277,19 +281,10 @@ const calculateFrameRate = (rateString: string): number => {
   return numerator / denominator
 }
 
-/**
- * 从完整路径中提取文件名
- * @param fullPath - ffprobe 返回的文件路径
- */
 const extractFilename = (fullPath: string): string => {
-  // 兼容 Windows (\) 和 Linux (/) 的路径分隔符
   return fullPath.replace(/^.*[\\\/]/, '')
 }
 
-/**
- * 新增：将秒数格式化为 HH:MM:SS.sss 格式
- * @param seconds - 秒数
- */
 const formatTime = (seconds: number | null): string => {
   if (seconds === null || isNaN(seconds)) return '00:00:00.000'
 
@@ -315,14 +310,8 @@ const fetchFileInfo = async (fileId: string) => {
   try {
     const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
     fileInfo.value = response.data
-    // 设置默认的结束时间为视频总时长
-    if (fileInfo.value?.format?.duration) {
-      endTime.value = Math.floor(parseFloat(fileInfo.value.format.duration))
-    }
   } catch (err: unknown) {
-    // 修正: 使用 'unknown' 代替 'any'
     let errorMessage = '无法连接到服务器或发生未知错误'
-    // 修正: 类型守卫，安全地处理错误
     if (isAxiosError(err)) {
       errorMessage = err.response?.data?.error || err.message
     } else if (err instanceof Error) {
@@ -335,22 +324,23 @@ const fetchFileInfo = async (fileId: string) => {
   }
 }
 
+// 新增：处理导出按钮点击事件
+const handleExportClick = () => {
+  isExportModalVisible.value = true
+}
+
 // --- Watcher ---
 watch(
   () => fileStore.selectedFileId,
   (newId) => {
-    // 修正: 将未使用的 'oldId' 重命名为 '_oldId'
     if (newId) {
       fetchFileInfo(newId)
     } else {
-      // 如果ID被清空，重置所有状态
       fileInfo.value = null
       error.value = null
-      startTime.value = 0
-      endTime.value = 0
     }
   },
-  { immediate: true }, // 立即执行一次，处理初始状态
+  { immediate: true },
 )
 
 watch(trimRange, (newRange) => {
@@ -358,7 +348,6 @@ watch(trimRange, (newRange) => {
   endTime.value = newRange[1];
 });
 
-// 3. 监听数字输入框的变化，更新滑块
 watch([startTime, endTime], (newTimes) => {
   trimRange.value = [newTimes[0], newTimes[1]];
 });
@@ -366,7 +355,12 @@ watch([startTime, endTime], (newTimes) => {
 </script>
 
 <style scoped>
-.workspace-container,
+.workspace-container {
+  height: 100%;
+  overflow-y: auto; /* 允许内容超出时滚动 */
+  background-color: #fafafa;
+}
+
 .placeholder,
 .loading-spinner,
 .error-message {
@@ -378,30 +372,30 @@ watch([startTime, endTime], (newTimes) => {
   padding: 24px;
   box-sizing: border-box;
 }
+
 .file-workspace {
-  width: 100%;
-  height: 100%;
-  display: block;
-  text-align: left;
+  padding: 16px 24px;
+  box-sizing: border-box;
 }
+
 .operation-section {
   margin-top: 16px;
 }
 
-/* 新增：为时间输入区添加 Grid 布局，使其对齐美观 */
 .time-input-grid {
   display: grid;
-  grid-template-columns: auto 1fr auto; /* 标签 | 输入框 | 格式化时间 */
-  gap: 12px; /* 元素间的间距 */
-  align-items: center; /* 垂直居中对齐 */
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
   margin-top: 16px;
-  max-width: 500px; /* 限制最大宽度，防止在大屏上过于拉伸 */
+  max-width: 600px;
 }
 
 .time-display {
-  font-family: 'Courier New', Courier, monospace; /* 使用等宽字体，防止数字跳动 */
-  background-color: #f5f5f5;
+  font-family: 'Courier New', Courier, monospace;
+  background-color: #f0f2f5;
   padding: 4px 8px;
   border-radius: 4px;
+  border: 1px solid #d9d9d9;
 }
 </style>

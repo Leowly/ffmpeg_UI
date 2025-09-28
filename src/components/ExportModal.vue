@@ -1,14 +1,35 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useFileStore, type UserFile } from '@/stores/fileStore'
+// 修正 1: 移除了未被使用的 'UserFile' 类型导入
+import { useFileStore } from '@/stores/fileStore'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
-import axios from 'axios'
+import axios, { isAxiosError } from 'axios'
+
+// --- 修正 2: 为 ffprobe 的输出定义具体的类型接口 ---
+interface StreamInfo {
+  codec_type: 'video' | 'audio'
+  codec_name: string
+  bit_rate?: string
+  width?: number
+  height?: number
+}
+
+interface FormatInfo {
+  format_name: string
+  duration: string
+}
+
+interface FFProbeResult {
+  streams: StreamInfo[]
+  format: FormatInfo
+}
 
 // --- Props and Emits ---
 const props = defineProps<{
   visible: boolean
-  fileInfo: any
+  // 修正 2: 使用定义的接口代替 'any'
+  fileInfo: FFProbeResult | null
   initialStartTime: number
   initialEndTime: number
 }>()
@@ -34,10 +55,12 @@ const formState = reactive({
 })
 
 // --- Computed Properties ---
-const videoStream = computed(() => props.fileInfo?.streams.find((s: any) => s.codec_type === 'video'))
-const audioStream = computed(() => props.fileInfo?.streams.find((s: any) => s.codec_type === 'audio'))
+// 修正 3 & 4: 为 .find() 中的参数 's' 提供正确的类型
+const videoStream = computed(() => props.fileInfo?.streams.find((s: StreamInfo) => s.codec_type === 'video'))
+const audioStream = computed(() => props.fileInfo?.streams.find((s: StreamInfo) => s.codec_type === 'audio'))
+
 const originalAspectRatio = computed(() => {
-  if (videoStream.value) {
+  if (videoStream.value && videoStream.value.width && videoStream.value.height) {
     return videoStream.value.width / videoStream.value.height
   }
   return 16 / 9
@@ -58,14 +81,14 @@ watch(() => props.visible, (isVisible) => {
 
     if (videoStream.value) {
       formState.videoCodec = 'copy'
-      formState.videoBitrate = Math.round((parseInt(videoStream.value.bit_rate || props.fileInfo.format.bit_rate) || 2000000) / 1000)
-      formState.resolution.width = videoStream.value.width
-      formState.resolution.height = videoStream.value.height
+      formState.videoBitrate = Math.round((parseInt(videoStream.value.bit_rate || '2000000')) / 1000)
+      formState.resolution.width = videoStream.value.width || 1920
+      formState.resolution.height = videoStream.value.height || 1080
     }
 
     if (audioStream.value) {
       formState.audioCodec = 'copy'
-      formState.audioBitrate = Math.round((parseInt(audioStream.value.bit_rate) || 128000) / 1000)
+      formState.audioBitrate = Math.round((parseInt(audioStream.value.bit_rate || '128000')) / 1000)
     }
   }
 })
@@ -99,16 +122,20 @@ const handleOk = async () => {
       ...formState,
       startTime: props.initialStartTime,
       endTime: props.initialEndTime,
-      // 只传递需要的信息
       files: formState.selectedFiles,
-      totalDuration: parseFloat(props.fileInfo.format.duration),
+      totalDuration: props.fileInfo ? parseFloat(props.fileInfo.format.duration) : 0,
     }
     const response = await axios.post(API_ENDPOINTS.PROCESS_FILE, payload)
     message.success(`任务已创建 (ID: ${response.data.task_id})，正在后台处理...`)
-    // TODO: Can start polling for status here or show progress in another component
     emit('update:visible', false)
-  } catch (error: any) {
-    message.error(error.response?.data?.error || '创建任务失败')
+  } catch (error: unknown) { // 修正 5: 使用 'unknown' 代替 'any' 并进行类型检查
+    let errorMessage = '创建任务失败'
+    if (isAxiosError(error)) {
+      errorMessage = error.response?.data?.error || error.message
+    } else if (error instanceof Error) {
+      errorMessage = error.message
+    }
+    message.error(errorMessage)
   } finally {
     isProcessing.value = false
   }
@@ -116,6 +143,8 @@ const handleOk = async () => {
 
 // Generates the FFmpeg command for preview
 const ffmpegCommand = computed(() => {
+  if (!props.fileInfo) return '等待文件信息...'
+
   let cmd = `ffmpeg -i "INPUT_FILE"`
 
   // Cropping
@@ -129,7 +158,7 @@ const ffmpegCommand = computed(() => {
       cmd += ` -c:v copy`
     } else {
       cmd += ` -c:v ${formState.videoCodec} -b:v ${formState.videoBitrate}k`
-      if (formState.resolution.width !== videoStream.value.width || formState.resolution.height !== videoStream.value.height) {
+      if (videoStream.value.width && videoStream.value.height && (formState.resolution.width !== videoStream.value.width || formState.resolution.height !== videoStream.value.height)) {
         cmd += ` -s ${formState.resolution.width}x${formState.resolution.height}`
       }
     }
