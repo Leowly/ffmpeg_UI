@@ -22,9 +22,6 @@
         :sub-title="mediaTypeDisplay"
       />
 
-      <!-- ======================================================= -->
-      <!-- =========== 唯一的、智能且响应式的描述列表 ============ -->
-      <!-- ======================================================= -->
       <a-descriptions bordered :column="descriptionColumns">
         <!-- 1. 通用信息 (总是显示) -->
         <a-descriptions-item label="容器格式" :span="2">{{
@@ -42,9 +39,14 @@
 
         <!-- 视频专属信息 -->
         <template v-if="mediaType === 'video' && videoStream">
-          <a-descriptions-item label="总比特率"
-            >{{ (parseInt(fileInfo.format.bit_rate) / 1000).toFixed(0) }} kb/s</a-descriptions-item
-          >
+          <!-- ======================================================= -->
+          <!-- ============== 关键修复点 ============================= -->
+          <!-- ======================================================= -->
+          <!-- 修正: 这里应该显示视频流自身的比特率，而不是重复显示总比特率 -->
+          <a-descriptions-item v-if="videoStream.bit_rate" label="视频比特率">
+            {{ (parseInt(videoStream.bit_rate) / 1000).toFixed(0) }} kb/s
+          </a-descriptions-item>
+
           <a-descriptions-item label="分辨率"
             >{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item
           >
@@ -58,7 +60,6 @@
 
         <!-- 音频专属信息 -->
         <template v-if="mediaType === 'audio' && audioStream">
-          <!-- 👇 3. 使用 audioBitrate 并调整显示逻辑 -->
           <a-descriptions-item label="音频比特率">{{ audioBitrate }}</a-descriptions-item>
         </template>
 
@@ -73,7 +74,7 @@
           >
         </template>
 
-        <!-- 4. 封面专属信息 (仅当 mediaType 为 'audio' 且存在封面时显示) -->
+        <!-- 封面专属信息 (仅当 mediaType 为 'audio' 且存在封面时显示) -->
         <template v-if="mediaType === 'audio' && videoStream">
           <a-descriptions-item label="内嵌封面尺寸"
             >{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item
@@ -87,8 +88,6 @@
       <a-divider>裁剪与其他操作</a-divider>
       <div class="operation-section">
         <h3>视频/音频裁剪</h3>
-
-        <!-- 1. 可视化范围滑块 -->
         <a-slider
           v-model:value="trimRange"
           range
@@ -97,8 +96,6 @@
           :step="0.01"
           :tip-formatter="formatTime"
         />
-
-        <!-- 2. 增强型时间输入 -->
         <div class="time-input-grid">
           <span>开始时间:</span>
           <a-input-number
@@ -109,7 +106,6 @@
             string-mode
           />
           <span class="time-display">{{ formatTime(startTime) }}</span>
-
           <span>结束时间:</span>
           <a-input-number
             v-model:value="endTime"
@@ -122,9 +118,6 @@
         </div>
       </div>
 
-      <!-- ======================================================= -->
-      <!-- ============== 新增: 导出功能触发器 =================== -->
-      <!-- ======================================================= -->
       <a-float-button
         type="primary"
         shape="circle"
@@ -168,9 +161,7 @@ interface StreamInfo {
 }
 interface FormatInfo {
   filename: string
-  // --- 👇 这里是关键修复 ---
-  format_name: string; // 添加此属性以匹配 ExportModal 的期望
-  // --- 👆 修复结束 ---
+  format_name: string;
   format_long_name: string
   duration: string
   size: string

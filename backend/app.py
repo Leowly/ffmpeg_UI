@@ -217,54 +217,77 @@ def process_file():
 
     data = request.json
     
-    # --- 构建 FFmpeg 命令 ---
-    input_file_id = data['files'][0] # 简单起见，我们先处理单个文件
-    input_path = os.path.join(user_upload_folder, input_file_id)
-    if not os.path.exists(input_path):
-        return jsonify({"error": "Input file not found"}), 404
+    # --- 关键改动 1: 从 'files' 字段获取文件ID列表 ---
+    file_ids = data.get('files', [])
+    if not file_ids:
+        return jsonify({"error": "No files selected for processing"}), 400
 
-    base, _ = os.path.splitext(input_file_id)
-    output_filename = f"{base}_processed.{data['container']}"
-    output_path = os.path.join(user_output_folder, output_filename)
+    created_tasks = []
 
-    command = ['ffmpeg', '-y', '-i', input_path]
-    
-    # 裁剪
-    if 'startTime' in data and 'endTime' in data:
-        command.extend(['-ss', str(data['startTime']), '-to', str(data['endTime'])])
+    # --- 关键改动 2: 循环处理每个文件，并为每个文件创建任务 ---
+    for file_id in file_ids:
+        input_path = os.path.join(user_upload_folder, file_id)
+        if not os.path.exists(input_path):
+            print(f"Skipping non-existent file: {file_id}")
+            continue # 如果文件不存在，则跳过
 
-    # 视频
-    is_video_container = data['container'] in ['mp4', 'mkv', 'mov'] # 简化判断
-    if is_video_container:
-        if data['videoCodec'] == 'copy':
-            command.extend(['-c:v', 'copy'])
+        base, _ = os.path.splitext(file_id)
+        # 为输出文件名添加一个唯一后缀，防止重名
+        output_suffix = f"processed_{str(uuid.uuid4())[:4]}"
+        output_filename = f"{base}_{output_suffix}.{data['container']}"
+        output_path = os.path.join(user_output_folder, output_filename)
+
+        command = ['ffmpeg', '-y', '-i', input_path]
+        
+        # 裁剪 (所有文件应用相同的裁剪设置)
+        if 'startTime' in data and 'endTime' in data:
+            command.extend(['-ss', str(data['startTime']), '-to', str(data['endTime'])])
+
+        # 视频处理
+        is_video_container = data['container'] in ['mp4', 'mkv', 'mov']
+        if is_video_container:
+            if data['videoCodec'] == 'copy':
+                command.extend(['-c:v', 'copy'])
+            else:
+                command.extend(['-c:v', data['videoCodec']])
+                # 智能判断是否添加比特率和分辨率参数
+                if 'videoBitrate' in data:
+                     command.extend(['-b:v', f"{data['videoBitrate']}k"])
+                if 'resolution' in data:
+                     command.extend(['-s', f"{data['resolution']['width']}x{data['resolution']['height']}"])
         else:
-            command.extend(['-c:v', data['videoCodec'], '-b:v', f"{data['videoBitrate']}k"])
-            if 'resolution' in data:
-                 command.extend(['-s', f"{data['resolution']['width']}x{data['resolution']['height']}"])
-    else:
-        command.append('-vn')
+            command.append('-vn')
 
-    # 音频
-    if data['audioCodec'] == 'copy':
-        command.extend(['-c:a', 'copy'])
-    else:
-        command.extend(['-c:a', data['audioCodec'], '-b:a', f"{data['audioBitrate']}k"])
+        # 音频处理
+        if data['audioCodec'] == 'copy':
+            command.extend(['-c:a', 'copy'])
+        else:
+            command.extend(['-c:a', data['audioCodec']])
+            # 智能判断是否添加音频比特率参数
+            if 'audioBitrate' in data:
+                 command.extend(['-b:a', f"{data['audioBitrate']}k"])
 
-    command.append(output_path)
+        command.append(output_path)
 
-    # --- 创建并启动任务 ---
-    task_id = str(uuid.uuid4())
-    with tasks_lock:
-        tasks[task_id] = {"status": "processing", "progress": 0}
+        # 为当前文件创建并启动任务
+        task_id = str(uuid.uuid4())
+        with tasks_lock:
+            tasks[task_id] = {
+                "status": "processing", 
+                "progress": 0,
+                "command": " ".join(command) # 存储命令用于调试
+            }
 
-    total_duration = data.get('totalDuration', 0)
-    
-    thread = threading.Thread(target=run_ffmpeg_task, args=(task_id, command, output_path, total_duration))
-    thread.daemon = True
-    thread.start()
+        total_duration = data.get('totalDuration', 0)
+        
+        thread = threading.Thread(target=run_ffmpeg_task, args=(task_id, command, output_path, total_duration))
+        thread.daemon = True
+        thread.start()
+        
+        created_tasks.append({"file_id": file_id, "task_id": task_id})
 
-    return jsonify({"msg": "Processing started", "task_id": task_id}), 202
+    # --- 关键改动 3: 返回所有已创建任务的信息 ---
+    return jsonify({"msg": f"Successfully created {len(created_tasks)} tasks.", "tasks": created_tasks}), 202
 
 
 @app.route('/api/task-status/<task_id>', methods=['GET'])
