@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+SQLAlchemy
+pydantic
+python-multipart
+passlib[bcrypt]
+python-jose[pycryptodome]
+argon2-cffi

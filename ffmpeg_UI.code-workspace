@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "ffmpeg_UI",
+			"path": "."
+		},
+		{
+			"name": "backend",
+			"path": "backend"
+		},
+		{
+			"name": "frontend",
+			"path": "frontend"
+		}
+	],
+	"settings": {}
+}

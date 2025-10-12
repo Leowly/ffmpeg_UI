@@ -1,3 +1,4 @@
-flask_sessions/
 uploads/
-outputs/
+.venv/
+__pycache__/
+*.pyc
