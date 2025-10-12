@@ -6,56 +6,37 @@
     </div>
 
     <!-- 加载状态 -->
-    <div v-else-if="isLoading" class="loading-spinner">
+    <div v-else-if="fileStore.isLoading" class="loading-spinner">
       <a-spin size="large" tip="正在加载文件信息..." />
     </div>
 
     <!-- 错误状态 -->
-    <div v-else-if="error" class="error-message">
-      <a-alert message="加载失败" :description="error" type="error" show-icon />
+    <div v-else-if="fileStore.error" class="error-message">
+      <a-alert message="加载失败" :description="fileStore.error" type="error" show-icon />
     </div>
 
     <!-- 成功加载文件信息 -->
-    <div v-else-if="fileInfo" class="file-workspace" ref="workspaceRef">
+    <div v-else-if="fileStore.fileInfo" class="file-workspace" ref="workspaceRef">
       <a-page-header
-        :title="extractFilename(fileInfo.format.filename)"
+        :title="selectedFile?.name || ''"
         :sub-title="mediaTypeDisplay"
       />
 
       <a-descriptions bordered :column="descriptionColumns">
-        <!-- 1. 通用信息 (总是显示) -->
-        <a-descriptions-item label="容器格式" :span="2">{{
-          fileInfo.format.format_long_name
-        }}</a-descriptions-item>
-        <a-descriptions-item label="时长"
-          >{{ parseFloat(fileInfo.format.duration).toFixed(2) }} 秒</a-descriptions-item
-        >
-        <a-descriptions-item label="文件大小"
-          >{{ (parseInt(fileInfo.format.size) / 1024 / 1024).toFixed(2) }} MB</a-descriptions-item
-        >
-        <a-descriptions-item label="总比特率"
-          >{{ (parseInt(fileInfo.format.bit_rate) / 1000).toFixed(0) }} kb/s</a-descriptions-item
-        >
+        <!-- 1. 通用信息 -->
+        <a-descriptions-item label="容器格式" :span="2">{{ fileStore.fileInfo.format.format_long_name }}</a-descriptions-item>
+        <a-descriptions-item label="时长">{{ parseFloat(fileStore.fileInfo.format.duration).toFixed(2) }} 秒</a-descriptions-item>
+        <a-descriptions-item label="文件大小">{{ (parseInt(fileStore.fileInfo.format.size) / 1024 / 1024).toFixed(2) }} MB</a-descriptions-item>
+        <a-descriptions-item label="总比特率">{{ (parseInt(fileStore.fileInfo.format.bit_rate) / 1000).toFixed(0) }} kb/s</a-descriptions-item>
 
         <!-- 视频专属信息 -->
         <template v-if="mediaType === 'video' && videoStream">
-          <!-- ======================================================= -->
-          <!-- ============== 关键修复点 ============================= -->
-          <!-- ======================================================= -->
-          <!-- 修正: 这里应该显示视频流自身的比特率，而不是重复显示总比特率 -->
           <a-descriptions-item v-if="videoStream.bit_rate" label="视频比特率">
             {{ (parseInt(videoStream.bit_rate) / 1000).toFixed(0) }} kb/s
           </a-descriptions-item>
-
-          <a-descriptions-item label="分辨率"
-            >{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item
-          >
-          <a-descriptions-item label="视频编码"
-            >{{ videoStream.codec_name }} ({{ videoStream.codec_long_name }})</a-descriptions-item
-          >
-          <a-descriptions-item label="帧率"
-            >{{ calculateFrameRate(videoStream.r_frame_rate).toFixed(2) }} fps</a-descriptions-item
-          >
+          <a-descriptions-item label="分辨率">{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item>
+          <a-descriptions-item label="视频编码">{{ videoStream.codec_name }} ({{ videoStream.codec_long_name }})</a-descriptions-item>
+          <a-descriptions-item label="帧率">{{ calculateFrameRate(videoStream.r_frame_rate).toFixed(2) }} fps</a-descriptions-item>
         </template>
 
         <!-- 音频专属信息 -->
@@ -63,25 +44,17 @@
           <a-descriptions-item label="音频比特率">{{ audioBitrate }}</a-descriptions-item>
         </template>
 
-        <!-- 音频流通用信息 (视频和音频文件都可能有) -->
+        <!-- 音频流通用信息 -->
         <template v-if="audioStream">
-          <a-descriptions-item label="音频编码"
-            >{{ audioStream.codec_name }} ({{ audioStream.codec_long_name }})</a-descriptions-item
-          >
+          <a-descriptions-item label="音频编码">{{ audioStream.codec_name }} ({{ audioStream.codec_long_name }})</a-descriptions-item>
           <a-descriptions-item label="采样率">{{ audioStream.sample_rate }} Hz</a-descriptions-item>
-          <a-descriptions-item label="声道"
-            >{{ audioStream.channels }} ({{ audioStream.channel_layout }})</a-descriptions-item
-          >
+          <a-descriptions-item label="声道">{{ audioStream.channels }} ({{ audioStream.channel_layout }})</a-descriptions-item>
         </template>
 
-        <!-- 封面专属信息 (仅当 mediaType 为 'audio' 且存在封面时显示) -->
+        <!-- 封面专属信息 -->
         <template v-if="mediaType === 'audio' && videoStream">
-          <a-descriptions-item label="内嵌封面尺寸"
-            >{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item
-          >
-          <a-descriptions-item label="内嵌封面格式">{{
-            videoStream.codec_name
-          }}</a-descriptions-item>
+          <a-descriptions-item label="内嵌封面尺寸">{{ videoStream.width }} x {{ videoStream.height }}</a-descriptions-item>
+          <a-descriptions-item label="内嵌封面格式">{{ videoStream.codec_name }}</a-descriptions-item>
         </template>
       </a-descriptions>
 
@@ -92,149 +65,88 @@
           v-model:value="trimRange"
           range
           :min="0"
-          :max="totalDuration"
+          :max="fileStore.totalDuration"
           :step="0.01"
           :tip-formatter="formatTime"
         />
         <div class="time-input-grid">
           <span>开始时间:</span>
           <a-input-number
-            v-model:value="startTime"
+            v-model:value="startTimeValue"
             :min="0"
-            :max="endTime"
+            :max="endTimeValue"
             :step="0.1"
             string-mode
           />
-          <span class="time-display">{{ formatTime(startTime) }}</span>
+          <span class="time-display">{{ formatTime(startTimeValue) }}</span>
           <span>结束时间:</span>
           <a-input-number
-            v-model:value="endTime"
-            :min="startTime"
-            :max="totalDuration"
+            v-model:value="endTimeValue"
+            :min="startTimeValue"
+            :max="fileStore.totalDuration"
             :step="0.1"
             string-mode
           />
-          <span class="time-display">{{ formatTime(endTime) }}</span>
+          <span class="time-display">{{ formatTime(endTimeValue) }}</span>
         </div>
+        <!-- 为浮动按钮添加的底部安全空间 -->
+        <div class="bottom-spacer"></div>
       </div>
-
-      <a-float-button
-        type="primary"
-        shape="circle"
-        tooltip="导出文件"
-        @click="handleExportClick"
-      >
-        <template #icon><ExportOutlined /></template>
-      </a-float-button>
-
-      <ExportModal
-        v-model:visible="isExportModalVisible"
-        :file-info="fileInfo"
-        :initial-start-time="startTime"
-        :initial-end-time="endTime"
-      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
-import axios, { isAxiosError } from 'axios'
+import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
-import { API_ENDPOINTS } from '@/api'
-import { message } from 'ant-design-vue'
-import { ExportOutlined } from '@ant-design/icons-vue'
-import ExportModal from './ExportModal.vue'
-
-// --- 为 ffprobe 的输出定义类型接口 ---
-interface StreamInfo {
-  codec_type: 'video' | 'audio'
-  width?: number
-  height?: number
-  codec_name: string
-  codec_long_name: string
-  r_frame_rate: string
-  sample_rate?: string
-  channels?: number
-  channel_layout?: string
-  bit_rate?: string
-}
-interface FormatInfo {
-  filename: string
-  format_name: string;
-  format_long_name: string
-  duration: string
-  size: string
-  bit_rate: string
-}
-
-interface FFProbeResult {
-  streams: StreamInfo[]
-  format: FormatInfo
-}
 
 const fileStore = useFileStore()
 
-// --- Reactive State ---
-const isLoading = ref(false)
-const fileInfo = ref<FFProbeResult | null>(null)
-const error = ref<string | null>(null)
-const trimRange = ref<[number, number]>([0, 0])
-const isExportModalVisible = ref(false)
-
-// --- Operation State ---
-const startTime = ref(0)
-const endTime = ref(0)
+// --- Refs for UI ---
 const workspaceRef = ref<HTMLElement | null>(null)
 const descriptionColumns = ref(2)
-const totalDuration = computed(() => {
-  return fileInfo.value ? parseFloat(fileInfo.value.format.duration) : 0
-})
 let observer: ResizeObserver | null = null
 
-watch(fileInfo, (newFileInfo) => {
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
+// --- Computed Properties from Store ---
+const videoStream = computed(() => fileStore.fileInfo?.streams.find((s) => s.codec_type === 'video'))
+const audioStream = computed(() => fileStore.fileInfo?.streams.find((s) => s.codec_type === 'audio'))
 
-  if (newFileInfo) {
-    const duration = parseFloat(newFileInfo.format.duration);
-    startTime.value = 0;
-    endTime.value = duration;
-    trimRange.value = [0, duration];
+const selectedFile = computed(() => {
+  if (!fileStore.selectedFileId) return null;
+  return fileStore.fileList.find(f => f.id === fileStore.selectedFileId);
+});
 
-    nextTick(() => {
-      if (workspaceRef.value) {
-        observer = new ResizeObserver((entries) => {
-          const contentWidth = entries[0].contentRect.width;
-          descriptionColumns.value = contentWidth < 620 ? 1 : 2;
-        });
-        observer.observe(workspaceRef.value);
-      }
-    });
-  } else {
-    startTime.value = 0;
-    endTime.value = 0;
-    trimRange.value = [0, 0];
+// --- Computed properties for trim controls ---
+const trimRange = computed({
+  get(): [number, number] {
+    return [fileStore.startTime, fileStore.endTime] as [number, number];
+  },
+  set(newRange: [number, number]) {
+    fileStore.updateTrimTimes({ start: newRange[0], end: newRange[1] });
   }
 });
 
-const videoStream = computed(() => fileInfo.value?.streams.find((s) => s.codec_type === 'video'))
-const audioStream = computed(() => fileInfo.value?.streams.find((s) => s.codec_type === 'audio'))
+const startTimeValue = computed<number>({
+  get: () => fileStore.startTime,
+  set: (newStart) => {
+    fileStore.updateTrimTimes({ start: newStart, end: fileStore.endTime })
+  }
+});
 
+const endTimeValue = computed<number>({
+  get: () => fileStore.endTime,
+  set: (newEnd) => {
+    fileStore.updateTrimTimes({ start: fileStore.startTime, end: newEnd })
+  }
+});
+
+
+// --- UI Logic ---
 const mediaType = computed<'video' | 'audio' | 'unknown'>(() => {
-  if (!fileInfo.value) return 'unknown'
-
+  if (!fileStore.fileInfo) return 'unknown'
   const vs = videoStream.value
-  const as = audioStream.value
-
-  if (vs && !['mjpeg', 'png'].includes(vs.codec_name)) {
-    return 'video'
-  }
-  if (as) {
-    return 'audio'
-  }
+  if (vs && !['mjpeg', 'png'].includes(vs.codec_name)) return 'video'
+  if (audioStream.value) return 'audio'
   return 'unknown'
 })
 
@@ -248,16 +160,16 @@ const audioBitrate = computed(() => {
   if (audioStream.value && audioStream.value.bit_rate) {
     return `${(parseInt(audioStream.value.bit_rate) / 1000).toFixed(0)} kb/s`
   }
-  if (audioStream.value && fileInfo.value?.format) {
+  if (audioStream.value && fileStore.fileInfo?.format) {
     const calculatedBps =
-      (parseInt(fileInfo.value.format.size) * 8) / parseFloat(fileInfo.value.format.duration)
+      (parseInt(fileStore.fileInfo.format.size) * 8) / parseFloat(fileStore.fileInfo.format.duration)
     if (
-      fileInfo.value.streams.length === 1 ||
-      (fileInfo.value.streams.length === 2 && videoStream.value?.codec_name.match(/mjpeg|png/))
+      fileStore.fileInfo.streams.length === 1 ||
+      (fileStore.fileInfo.streams.length === 2 && videoStream.value?.codec_name.match(/mjpeg|png/))
     ) {
       return `${(calculatedBps / 1000).toFixed(0)} kb/s (计算值)`
     }
-    return `(总比特率: ${(parseInt(fileInfo.value.format.bit_rate) / 1000).toFixed(0)} kb/s)`
+    return `(总比特率: ${(parseInt(fileStore.fileInfo.format.bit_rate) / 1000).toFixed(0)} kb/s)`
   }
   return 'N/A'
 })
@@ -272,75 +184,48 @@ const calculateFrameRate = (rateString: string): number => {
   return numerator / denominator
 }
 
-const extractFilename = (fullPath: string): string => {
-  return fullPath.replace(/^.*[\\\/]/, '')
-}
-
 const formatTime = (seconds: number | null): string => {
   if (seconds === null || isNaN(seconds)) return '00:00:00.000'
-
-  const h = Math.floor(seconds / 3600)
-    .toString()
-    .padStart(2, '0')
-  const m = Math.floor((seconds % 3600) / 60)
-    .toString()
-    .padStart(2, '0')
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, '0')
+  const h = Math.floor(seconds / 3600).toString().padStart(2, '0')
+  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0')
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0')
   const ms = (seconds % 1).toFixed(3).substring(2).padEnd(3, '0')
-
   return `${h}:${m}:${s}.${ms}`
 }
-// --- Logic ---
-const fetchFileInfo = async (fileId: string) => {
-  isLoading.value = true
-  error.value = null
-  fileInfo.value = null
 
-  try {
-    const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
-    fileInfo.value = response.data
-  } catch (err: unknown) {
-    let errorMessage = '无法连接到服务器或发生未知错误'
-    if (isAxiosError(err)) {
-      errorMessage = err.response?.data?.error || err.message
-    } else if (err instanceof Error) {
-      errorMessage = err.message
-    }
-    error.value = errorMessage
-    message.error(`加载文件信息失败: ${errorMessage}`)
-  } finally {
-    isLoading.value = false
+// --- Lifecycle Hooks for Responsive Columns ---
+const setupResizeObserver = () => {
+  if (workspaceRef.value) {
+    observer = new ResizeObserver((entries) => {
+      const contentWidth = entries[0].contentRect.width
+      descriptionColumns.value = contentWidth < 620 ? 1 : 2
+    })
+    observer.observe(workspaceRef.value)
   }
 }
 
-// 新增：处理导出按钮点击事件
-const handleExportClick = () => {
-  isExportModalVisible.value = true
-}
+watch(() => fileStore.fileInfo, (newFileInfo) => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+  if (newFileInfo) {
+    nextTick(() => {
+      setupResizeObserver()
+    })
+  }
+}, { deep: true });
 
-// --- Watcher ---
-watch(
-  () => fileStore.selectedFileId,
-  (newId) => {
-    if (newId) {
-      fetchFileInfo(newId)
-    } else {
-      fileInfo.value = null
-      error.value = null
-    }
-  },
-  { immediate: true },
-)
-
-watch(trimRange, (newRange) => {
-  startTime.value = newRange[0];
-  endTime.value = newRange[1];
+onMounted(() => {
+  if (fileStore.fileInfo) {
+    setupResizeObserver()
+  }
 });
 
-watch([startTime, endTime], (newTimes) => {
-  trimRange.value = [newTimes[0], newTimes[1]];
+onBeforeUnmount(() => {
+  if (observer) {
+    observer.disconnect()
+  }
 });
 
 </script>
@@ -388,5 +273,9 @@ watch([startTime, endTime], (newTimes) => {
   padding: 4px 8px;
   border-radius: 4px;
   border: 1px solid #d9d9d9;
+}
+
+.bottom-spacer {
+  height: 30px; /* 预留给左下角浮动按钮的空间 */
 }
 </style>

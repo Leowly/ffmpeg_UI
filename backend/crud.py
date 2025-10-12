@@ -50,3 +50,29 @@ def delete_file(db: Session, file_id: int):
         db.delete(db_file)
         db.commit()
     return db_file
+
+# --- Task CRUD Operations ---
+
+def get_user_tasks(db: Session, owner_id: int):
+    return db.query(models.ProcessingTask).filter(models.ProcessingTask.owner_id == owner_id).all()
+
+def create_task(db: Session, task: schemas.TaskCreate, owner_id: int, output_path: str):
+    db_task = models.ProcessingTask(
+        **task.model_dump(), 
+        owner_id=owner_id,
+        output_path=output_path
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+    return db_task
+
+def update_task(db: Session, task_id: int, status: str, details: str | None = None):
+    db_task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
+    if db_task:
+        db_task.status = status
+        if details:
+            db_task.details = details
+        db.commit()
+        db.refresh(db_task)
+    return db_task

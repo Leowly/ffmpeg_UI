@@ -1,30 +1,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useFileStore } from '@/stores/fileStore'
+import { useFileStore, type FFProbeResult, type Task } from '@/stores/fileStore'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
 import axios, { isAxiosError } from 'axios'
 
 // --- 类型定义 ---
-interface StreamInfo {
-  codec_type: 'video' | 'audio';
-  codec_name: string;
-  bit_rate?: string;
-  width?: number;
-  height?: number;
-}
-interface FormatInfo {
-  format_name: string;
-  duration: string;
-}
-interface FFProbeResult {
-  streams: StreamInfo[];
-  format: FormatInfo;
-}
-// =======================================================
-// ============== 这里是关键修复点 =========================
-// =======================================================
-// 为发送到后端的数据创建一个具体的类型接口
 interface ProcessPayload {
   files: string[];
   container: string;
@@ -33,20 +14,14 @@ interface ProcessPayload {
   totalDuration: number;
   videoCodec: string;
   audioCodec: string;
-  videoBitrate?: number; // 设为可选
-  resolution?: { // 设为可选
-    width: number;
-    height: number;
-    keepAspectRatio: boolean;
-  };
-  audioBitrate?: number; // 设为可选
+  videoBitrate?: number;
+  resolution?: { width: number; height: number; keepAspectRatio: boolean; };
+  audioBitrate?: number;
 }
-
 
 // --- Props and Emits ---
 const props = defineProps<{
   visible: boolean;
-  fileInfo: FFProbeResult | null;
   initialStartTime: number;
   initialEndTime: number;
 }>()
@@ -55,6 +30,12 @@ const emit = defineEmits(['update:visible'])
 // --- State ---
 const fileStore = useFileStore()
 const isProcessing = ref(false)
+
+// 本地状态，用于解耦
+const previewFileInfo = ref<FFProbeResult | null>(null)
+const isPreviewLoading = ref(false)
+const modalStartTime = ref(0)
+const modalEndTime = ref(0)
 
 const formState = reactive({
   selectedFiles: [] as string[],
@@ -75,7 +56,21 @@ const originalValues = reactive({
   audioBitrate: 192,
 })
 
-// --- Helper & Watchers (保持不变) ---
+// --- 核心逻辑：获取预览文件信息 ---
+const getPreviewInfo = async (fileId: string) => {
+  isPreviewLoading.value = true;
+  try {
+    const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId));
+    previewFileInfo.value = response.data;
+  } catch {
+    message.error('加载预览文件信息失败');
+    previewFileInfo.value = null;
+  } finally {
+    isPreviewLoading.value = false;
+  }
+};
+
+// --- Helper & Watchers ---
 const mapCodecNameToLib = (codecName: string, type: 'video' | 'audio'): string => {
   const videoMap: Record<string, string> = { h264: 'libx264', hevc: 'libx265', av1: 'libaom-av1' };
   const audioMap: Record<string, string> = { aac: 'aac', opus: 'opus', mp3: 'mp3' };
@@ -83,61 +78,91 @@ const mapCodecNameToLib = (codecName: string, type: 'video' | 'audio'): string =
   return audioMap[codecName] || 'aac';
 }
 
-watch(() => props.visible, async (isVisible) => {
-  if (isVisible && props.fileInfo) {
-    if (fileStore.fileList.length === 0) await fileStore.fetchFileList();
-    formState.selectedFiles = fileStore.selectedFileId ? [fileStore.selectedFileId] : [];
-    const format = props.fileInfo.format.format_name.split(',')[0];
-    formState.container = format || 'mp4';
-    formState.videoCodec = 'copy';
-    formState.audioCodec = 'copy';
-    const vs = props.fileInfo.streams.find(s => s.codec_type === 'video');
-    if (vs) {
-      originalValues.videoCodec = mapCodecNameToLib(vs.codec_name, 'video');
-      originalValues.videoBitrate = Math.round(parseInt(vs.bit_rate || '2000000') / 1000);
-      originalValues.width = vs.width || 1920;
-      originalValues.height = vs.height || 1080;
-      formState.videoBitrate = originalValues.videoBitrate;
-      formState.resolution.width = originalValues.width;
-      formState.resolution.height = originalValues.height;
+// 模态框打开时，同步初始状态
+watch(() => props.visible, (isVisible) => {
+  if (isVisible) {
+    if (fileStore.fileList.length === 0) {
+      fileStore.fetchFileList();
     }
-    const as = props.fileInfo.streams.find(s => s.codec_type === 'audio');
-    if (as) {
-      originalValues.audioCodec = mapCodecNameToLib(as.codec_name, 'audio');
-      originalValues.audioBitrate = Math.round(parseInt(as.bit_rate || '192000') / 1000);
-      formState.audioBitrate = originalValues.audioBitrate;
+    if (fileStore.selectedFileId && !formState.selectedFiles.includes(fileStore.selectedFileId)) {
+      formState.selectedFiles = [fileStore.selectedFileId];
+      getPreviewInfo(fileStore.selectedFileId);
+    } else if (!fileStore.selectedFileId) {
+      formState.selectedFiles = [];
+      previewFileInfo.value = null;
     }
+    // 始终同步初始时间
+    modalStartTime.value = props.initialStartTime;
+    modalEndTime.value = props.initialEndTime;
   }
 });
 
-watch(() => [formState.videoBitrate, formState.resolution.width, formState.resolution.height], () => {
-    if (formState.videoCodec === 'copy') formState.videoCodec = originalValues.videoCodec;
-});
-watch(() => formState.audioBitrate, () => {
-    if (formState.audioCodec === 'copy') formState.audioCodec = originalValues.audioCodec;
-});
-watch(() => formState.videoCodec, (newCodec) => {
-    if (newCodec === 'copy') {
-        formState.videoBitrate = originalValues.videoBitrate;
-        formState.resolution.width = originalValues.width;
-        formState.resolution.height = originalValues.height;
-    }
-});
-watch(() => formState.audioCodec, (newCodec) => {
-    if (newCodec === 'copy') formState.audioBitrate = originalValues.audioBitrate;
+// 监听模态框内部的文件选择变化
+watch(() => formState.selectedFiles, (newSelection, oldSelection) => {
+  const oldPrimary = oldSelection ? oldSelection[0] : null;
+  const newPrimary = newSelection.length > 0 ? newSelection[0] : null;
+
+  if (newPrimary && newPrimary !== oldPrimary) {
+    getPreviewInfo(newPrimary);
+  } else if (newSelection.length === 0) {
+    previewFileInfo.value = null;
+  }
+}, { deep: true });
+
+// 监听获取的 previewFileInfo，用它来填充表单默认值和时间
+watch(previewFileInfo, (fileInfo) => {
+  if (!fileInfo) {
+    modalStartTime.value = 0;
+    modalEndTime.value = 0;
+    return;
+  }
+
+  const duration = parseFloat(fileInfo.format.duration);
+  const newFileId = formState.selectedFiles[0];
+
+  // 如果窗口内选择的文件和主工作区不一致，则重置时间为完整时长
+  if (newFileId !== fileStore.selectedFileId) {
+    modalStartTime.value = 0;
+    modalEndTime.value = isNaN(duration) ? 0 : duration;
+  } else {
+    // 如果一致，则使用从 props 传入的（可能被裁剪的）时间
+    modalStartTime.value = props.initialStartTime;
+    modalEndTime.value = props.initialEndTime;
+  }
+
+  const format = fileInfo.format?.format_name.split(',')[0];
+  formState.container = format || 'mp4';
+  formState.videoCodec = 'copy';
+  formState.audioCodec = 'copy';
+
+  const vs = fileInfo.streams?.find(s => s.codec_type === 'video');
+  if (vs) {
+    originalValues.videoCodec = mapCodecNameToLib(vs.codec_name, 'video');
+    originalValues.videoBitrate = Math.round(parseInt(vs.bit_rate || '2000000') / 1000);
+    originalValues.width = vs.width || 1920;
+    originalValues.height = vs.height || 1080;
+    formState.videoBitrate = originalValues.videoBitrate;
+    formState.resolution.width = originalValues.width;
+    formState.resolution.height = originalValues.height;
+  }
+
+  const as = fileInfo.streams?.find(s => s.codec_type === 'audio');
+  if (as) {
+    originalValues.audioCodec = mapCodecNameToLib(as.codec_name, 'audio');
+    originalValues.audioBitrate = Math.round(parseInt(as.bit_rate || '192000') / 1000);
+    formState.audioBitrate = originalValues.audioBitrate;
+  }
 });
 
-
-// --- 智能预览 (保持不变) ---
+// --- 智能预览 ---
 const previewFileName = computed<string | null>(() => {
     if (formState.selectedFiles.length === 0) return null;
-    const currentFileIsInSelection = fileStore.selectedFileId && formState.selectedFiles.includes(fileStore.selectedFileId);
-    if (currentFileIsInSelection) {
-        const file = fileStore.fileList.find(f => f.id === fileStore.selectedFileId);
-        return file?.name || formState.selectedFiles[0];
-    }
-    const firstSelectedFile = fileStore.fileList.find(f => f.id === formState.selectedFiles[0]);
-    return firstSelectedFile?.name || null;
+    const file = fileStore.fileList.find(f => f.id === formState.selectedFiles[0]);
+    return file?.name || null;
+});
+
+const totalDuration = computed(() => {
+    return previewFileInfo.value ? parseFloat(previewFileInfo.value.format.duration) : 0;
 });
 
 const previewTooltipText = computed(() => {
@@ -147,12 +172,12 @@ const previewTooltipText = computed(() => {
 });
 
 const ffmpegCommandPreview = computed(() => {
-    if (!props.fileInfo || !previewFileName.value) return '请选择文件以生成预览...';
+    if (!previewFileInfo.value || !previewFileName.value) return '请选择文件以生成预览...';
     let cmd = `ffmpeg -i "${previewFileName.value}"`;
-    if (props.initialStartTime > 0 || props.initialEndTime < parseFloat(props.fileInfo.format.duration)) {
-        cmd += ` -ss ${props.initialStartTime.toFixed(3)} -to ${props.initialEndTime.toFixed(3)}`;
+    if (modalStartTime.value > 0 || modalEndTime.value < totalDuration.value) {
+        cmd += ` -ss ${modalStartTime.value.toFixed(3)} -to ${modalEndTime.value.toFixed(3)}`;
     }
-    const vs = props.fileInfo.streams.find(s => s.codec_type === 'video');
+    const vs = previewFileInfo.value.streams?.find(s => s.codec_type === 'video');
     const isVideoContainer = ['mp4', 'mkv', 'mov'].includes(formState.container);
     if (isVideoContainer && vs) {
         cmd += ` -c:v ${formState.videoCodec}`;
@@ -163,7 +188,7 @@ const ffmpegCommandPreview = computed(() => {
     } else {
         cmd += ` -vn`;
     }
-    const as = props.fileInfo.streams.find(s => s.codec_type === 'audio');
+    const as = previewFileInfo.value.streams?.find(s => s.codec_type === 'audio');
     if (as) {
         cmd += ` -c:a ${formState.audioCodec}`;
         if (formState.audioCodec !== 'copy' && formState.audioBitrate !== originalValues.audioBitrate) {
@@ -186,13 +211,12 @@ const handleOk = async () => {
     }
     isProcessing.value = true
     try {
-      // 修正: 使用我们定义的 ProcessPayload 接口代替 'any'
       const payload: ProcessPayload = {
         files: formState.selectedFiles,
         container: formState.container,
-        startTime: props.initialStartTime,
-        endTime: props.initialEndTime,
-        totalDuration: props.fileInfo ? parseFloat(props.fileInfo.format.duration) : 0,
+        startTime: modalStartTime.value,
+        endTime: modalEndTime.value,
+        totalDuration: totalDuration.value,
         videoCodec: formState.videoCodec,
         audioCodec: formState.audioCodec,
       }
@@ -201,9 +225,9 @@ const handleOk = async () => {
         if (formState.resolution.width !== originalValues.width || formState.resolution.height !== originalValues.height) payload.resolution = formState.resolution
       }
       if (formState.audioCodec !== 'copy' && formState.audioBitrate !== originalValues.audioBitrate) payload.audioBitrate = formState.audioBitrate
-      const response = await axios.post(API_ENDPOINTS.PROCESS_FILE, payload)
-      const createdCount = response.data.tasks?.length || 0
-      message.success(`成功创建 ${createdCount} 个处理任务，已在后台开始执行。`)
+      const response = await axios.post<Task[]>(API_ENDPOINTS.PROCESS_FILE, payload)
+      fileStore.addTasks(response.data); // 将新创建的任务添加到 store
+      message.success(`成功创建 ${response.data.length} 个处理任务，已在后台开始执行。`)
       emit('update:visible', false)
     } catch (error: unknown) {
       let errorMessage = '创建任务失败'
@@ -224,16 +248,13 @@ const handleCancel = () => { emit('update:visible', false) };
     :open="visible"
     title="导出设置"
     width="800px"
+    centered
     @cancel="handleCancel"
     :confirm-loading="isProcessing"
     @ok="handleOk"
   >
-     <!-- ======================================================= -->
-     <!-- ============== 全新设计的智能 Footer ==================== -->
-     <!-- ======================================================= -->
      <template #footer>
       <div class="modal-footer-grid">
-        <!-- 智能命令预览，带有动态 Tooltip -->
         <a-tooltip :title="previewTooltipText">
           <div class="ffmpeg-command-preview">
             <a-typography-text code>
@@ -241,8 +262,6 @@ const handleCancel = () => { emit('update:visible', false) };
             </a-typography-text>
           </div>
         </a-tooltip>
-
-        <!-- 操作按钮 -->
         <div>
           <a-button key="back" @click="handleCancel">取消</a-button>
           <a-button key="submit" type="primary" :loading="isProcessing" @click="handleOk">
@@ -252,7 +271,6 @@ const handleCancel = () => { emit('update:visible', false) };
       </div>
     </template>
 
-    <!-- 表单内容 (与上一版相同，保持不变) -->
     <a-form layout="vertical">
       <a-form-item label="待处理文件 (可多选)">
         <a-checkbox-group v-if="fileStore.fileList.length > 0" v-model:value="formState.selectedFiles" style="width: 100%">
@@ -265,56 +283,66 @@ const handleCancel = () => { emit('update:visible', false) };
         <a-alert v-else message="没有可用的文件" type="info" />
       </a-form-item>
 
-      <a-form-item label="容器格式">
-        <a-select v-model:value="formState.container">
-           <a-select-option value="mp4">MP4</a-select-option>
-          <a-select-option value="mkv">MKV</a-select-option>
-          <a-select-option value="mov">MOV</a-select-option>
-          <a-select-option value="mp3">MP3</a-select-option>
-          <a-select-option value="flac">FLAC</a-select-option>
-          <a-select-option value="wav">WAV</a-select-option>
-        </a-select>
-      </a-form-item>
-
-      <div v-if="props.fileInfo?.streams.find(s => s.codec_type === 'video')">
-        <a-divider>视频设置</a-divider>
-        <a-form-item label="视频编码">
-          <a-select v-model:value="formState.videoCodec">
-            <a-select-option value="copy">复制原始视频流 (最快)</a-select-option>
-            <a-select-option value="libx264">H.264 (libx264)</a-select-option>
-            <a-select-option value="libx265">H.265 (libhevc)</a-select-option>
-            <a-select-option value="libaom-av1">AV1 (libaom-av1)</a-select-option>
-          </a-select>
-        </a-form-item>
-
-        <a-form-item label="视频比特率 (kbps)">
-           <a-input-number v-model:value="formState.videoBitrate" :min="100" style="width: 100%;" />
-        </a-form-item>
-
-        <a-form-item label="分辨率">
-            <a-row :gutter="8">
-              <a-col :span="10"><a-input-number v-model:value="formState.resolution.width" :min="1" addon-after="宽" style="width: 100%"/></a-col>
-              <a-col :span="10"><a-input-number v-model:value="formState.resolution.height" :min="1" addon-after="高" style="width: 100%"/></a-col>
-              <a-col :span="4" style="display: flex; align-items: center;"><a-checkbox v-model:checked="formState.resolution.keepAspectRatio">锁定比例</a-checkbox></a-col>
-            </a-row>
-        </a-form-item>
+      <!-- 当没有文件信息时显示占位符 -->
+      <div v-if="!previewFileInfo && formState.selectedFiles.length > 0" class="settings-placeholder">
+        <a-spin tip="正在加载文件信息以生成设置选项..."></a-spin>
       </div>
+      
+      <!-- 当有文件信息时显示设置 -->
+      <fieldset :disabled="isPreviewLoading">
+        <div v-if="previewFileInfo">
+          <a-form-item label="容器格式">
+            <a-select v-model:value="formState.container">
+              <a-select-option value="mp4">MP4</a-select-option>
+              <a-select-option value="mkv">MKV</a-select-option>
+              <a-select-option value="mov">MOV</a-select-option>
+              <a-select-option value="mp3">MP3</a-select-option>
+              <a-select-option value="flac">FLAC</a-select-option>
+              <a-select-option value="wav">WAV</a-select-option>
+            </a-select>
+          </a-form-item>
 
-      <div v-if="props.fileInfo?.streams.find(s => s.codec_type === 'audio')">
-        <a-divider>音频设置</a-divider>
-        <a-form-item label="音频编码">
-          <a-select v-model:value="formState.audioCodec">
-            <a-select-option value="copy">复制原始音频流 (最快)</a-select-option>
-            <a-select-option value="aac">AAC</a-select-option>
-            <a-select-option value="opus">Opus</a-select-option>
-            <a-select-option value="mp3">MP3</a-select-option>
-          </a-select>
-        </a-form-item>
+          <div v-if="previewFileInfo.streams?.find(s => s.codec_type === 'video')">
+            <a-divider>视频设置</a-divider>
+            <a-form-item label="视频编码">
+              <a-select v-model:value="formState.videoCodec">
+                <a-select-option value="copy">复制原始视频流 (最快)</a-select-option>
+                <a-select-option value="libx264">H.264 (libx264)</a-select-option>
+                <a-select-option value="libx265">H.265 (libhevc)</a-select-option>
+                <a-select-option value="libaom-av1">AV1 (libaom-av1)</a-select-option>
+              </a-select>
+            </a-form-item>
 
-        <a-form-item label="音频比特率 (kbps)">
-           <a-input-number v-model:value="formState.audioBitrate" :min="32" style="width: 100%;" />
-        </a-form-item>
-      </div>
+            <a-form-item label="视频比特率 (kbps)">
+              <a-input-number v-model:value="formState.videoBitrate" :min="100" style="width: 100%;" />
+            </a-form-item>
+
+            <a-form-item label="分辨率">
+                <a-row :gutter="8">
+                  <a-col :span="10"><a-input-number v-model:value="formState.resolution.width" :min="1" addon-after="宽" style="width: 100%"/></a-col>
+                  <a-col :span="10"><a-input-number v-model:value="formState.resolution.height" :min="1" addon-after="高" style="width: 100%"/></a-col>
+                  <a-col :span="4" style="display: flex; align-items: center;"><a-checkbox v-model:checked="formState.resolution.keepAspectRatio">锁定比例</a-checkbox></a-col>
+                </a-row>
+            </a-form-item>
+          </div>
+
+          <div v-if="previewFileInfo.streams?.find(s => s.codec_type === 'audio')">
+            <a-divider>音频设置</a-divider>
+            <a-form-item label="音频编码">
+              <a-select v-model:value="formState.audioCodec">
+                <a-select-option value="copy">复制原始音频流 (最快)</a-select-option>
+                <a-select-option value="aac">AAC</a-select-option>
+                <a-select-option value="opus">Opus</a-select-option>
+                <a-select-option value="mp3">MP3</a-select-option>
+              </a-select>
+            </a-form-item>
+
+            <a-form-item label="音频比特率 (kbps)">
+              <a-input-number v-model:value="formState.audioBitrate" :min="32" style="width: 100%;" />
+            </a-form-item>
+          </div>
+        </div>
+      </fieldset>
     </a-form>
   </a-modal>
 </template>
@@ -337,5 +365,11 @@ const handleCancel = () => { emit('update:visible', false) };
 }
 .ffmpeg-command-preview code {
   font-size: 12px;
+}
+.settings-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
 }
 </style>

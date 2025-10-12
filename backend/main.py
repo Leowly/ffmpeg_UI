@@ -3,16 +3,17 @@ import os
 import uuid
 import subprocess
 import json
+import asyncio
 from typing import cast, List
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import crud, models, schemas, security
-from .database import SessionLocal, engine
+from .database import SessionLocal, engine, DB_PATH
 
 # This line creates the database tables if they don't exist
 models.Base.metadata.create_all(bind=engine)
@@ -38,9 +39,42 @@ app.add_middleware(
 )
 
 # --- Configuration ---
-UPLOAD_DIRECTORY = "./backend//uploads"
+UPLOAD_DIRECTORY = "./backend/uploads"
 # Ensure the upload directory exists
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
+
+# --- Background Task Runner ---
+async def run_ffmpeg_process(task_id: int, command: str, db_path: str):
+    """
+    一个在后台运行 ffmpeg 命令的函数。
+    注意：这个函数在一个独立的线程中运行，因此需要它自己的数据库会话。
+    """
+    # 为后台任务创建新的数据库会话
+    from .database import SessionLocal as TaskSessionLocal
+    db = TaskSessionLocal()
+    try:
+        # 1. 更新任务状态为 "processing"
+        crud.update_task(db, task_id=task_id, status="processing")
+
+        # 2. 执行 ffmpeg 命令
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+
+        # 3. 根据结果更新任务状态
+        if proc.returncode == 0:
+            crud.update_task(db, task_id=task_id, status="completed", details=stdout.decode())
+        else:
+            error_details = stderr.decode()
+            crud.update_task(db, task_id=task_id, status="failed", details=error_details)
+    except Exception as e:
+        crud.update_task(db, task_id=task_id, status="failed", details=str(e))
+    finally:
+        db.close()
+
 
 # --- Dependencies ---
 
@@ -229,33 +263,110 @@ def download_file(
     return FileResponse(path=file_path, filename=db_file.filename, media_type="application/octet-stream")
 
 
-@app.post("/api/process", response_model=List[schemas.File], tags=["Files"])
-def process_files(
+@app.post("/api/process", response_model=List[schemas.Task], tags=["Files"])
+async def process_files(
     payload: schemas.ProcessPayload,
+    background_tasks: BackgroundTasks,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    processed_files = []
+    """
+    接收一个或多个文件及处理参数，为每个文件创建一个后台 FFmpeg 处理任务。
+    """
+    created_tasks = []
+    # 为这个请求创建一个唯一的输出子目录
+    output_subdir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id), "processed", str(uuid.uuid4()))
+    os.makedirs(output_subdir, exist_ok=True)
+
     for file_id_str in payload.files:
         try:
             file_id = int(file_id_str)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid file ID format: {file_id_str}")
+            # 在循环中跳过无效ID，或收集错误信息
+            continue
 
         db_file = crud.get_file_by_id(db, file_id=file_id)
         if not db_file or db_file.owner_id != current_user.id:
-            # Skip or raise error for files not found or not owned
-            # For now, we'll raise an error for simplicity
-            raise HTTPException(status_code=404, detail=f"File {file_id_str} not found or not owned by user")
+            continue # 跳过不属于此用户的文
 
-        # Simulate FFmpeg processing
-        crud.update_file_status(db, file_id, "processing")
-        # In a real application, this would involve calling FFmpeg and waiting for it to complete
-        # For now, we'll just mark it as completed immediately
-        updated_file = crud.update_file_status(db, file_id, "completed")
-        if updated_file:
-            processed_files.append(updated_file)
-    return processed_files
+        # --- 动态构建 FFmpeg 命令 ---
+        input_path = db_file.filepath
+        original_filename = os.path.splitext(db_file.filename)[0]
+        output_filename = f"{original_filename}_processed.{payload.container}"
+        output_path = os.path.join(output_subdir, output_filename)
+
+        command = ["ffmpeg", "-i", input_path]
+
+        # 1. 时间裁剪
+        if payload.startTime > 0 or payload.endTime < payload.totalDuration:
+            command.extend(["-ss", str(payload.startTime), "-to", str(payload.endTime)])
+
+        # 2. 视频编码
+        command.extend(["-c:v", payload.videoCodec])
+        if payload.videoCodec != 'copy':
+            if payload.videoBitrate:
+                command.extend(["-b:v", f"{payload.videoBitrate}k"])
+            if payload.resolution:
+                command.extend(["-s", f"{payload.resolution.width}x{payload.resolution.height}"])
+        
+        # 3. 音频编码
+        command.extend(["-c:a", payload.audioCodec])
+        if payload.audioCodec != 'copy' and payload.audioBitrate:
+            command.extend(["-b:a", f"{payload.audioBitrate}k"])
+
+        # 4. 输出路径
+        command.append(output_path)
+
+        ffmpeg_command_str = " ".join(command)
+
+        # --- 创建数据库任务记录 ---
+        task_in = schemas.TaskCreate(ffmpeg_command=ffmpeg_command_str, output_path=output_path)
+        db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=output_path)
+
+        # --- 添加到后台任务队列 ---
+        background_tasks.add_task(run_ffmpeg_process, db_task.id, ffmpeg_command_str, db_path=DB_PATH)
+
+        created_tasks.append(db_task)
+
+    if not created_tasks:
+        raise HTTPException(
+            status_code=404,
+            detail="No valid files found to process for the given IDs."
+        )
+    
+    return created_tasks
+
+
+@app.get("/api/tasks", response_model=List[schemas.Task], tags=["Tasks"])
+def get_tasks(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的所有处理任务"""
+    return crud.get_user_tasks(db, owner_id=current_user.id)
+
+
+@app.get("/api/download-task/{task_id}", tags=["Tasks"])
+def download_task_output(
+    task_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """下载已完成任务的输出文件"""
+    task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
+
+    if not task or task.owner_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found or not owned by user")
+
+    if task.status != 'completed':
+        raise HTTPException(status_code=400, detail="Task is not completed yet")
+
+    if not task.output_path or not os.path.exists(task.output_path):
+        raise HTTPException(status_code=404, detail="Output file not found on server")
+
+    # 从输出路径中提取原始文件名作为下载时的文件名
+    output_filename = os.path.basename(task.output_path)
+    return FileResponse(path=task.output_path, filename=output_filename, media_type="application/octet-stream")
 
 
 @app.get("/api/task-status/{taskId}", tags=["Files"])

@@ -16,7 +16,7 @@ class File(FileBase):
     id: int
     owner_id: int
 
-    class Config:
+    class Config: # Changed from orm_mode = True
         from_attributes = True
 
 # --- Frontend Specific File Response Schema ---
@@ -54,6 +54,23 @@ class ProcessPayload(BaseModel):
     resolution: Optional[Resolution] = None
     audioBitrate: Optional[int] = None
 
+# --- Task Schemas ---
+class TaskBase(BaseModel):
+    ffmpeg_command: str
+
+class TaskCreate(TaskBase):
+    output_path: str
+
+class Task(TaskBase):
+    id: int
+    status: str
+    details: Optional[str] = None
+    output_path: Optional[str] = None # 新增
+    owner_id: int
+
+    class Config:
+        from_attributes = True
+
 # --- User Schemas ---
 
 class UserBase(BaseModel):
@@ -67,7 +84,8 @@ class UserCreate(UserBase):
 class User(UserBase):
     """从API返回用户信息时使用的数据模型，不包含密码"""
     id: int
-    files: List[File] = [] # Add files to User schema
+    files: List[File] = []
+    tasks: List[Task] = [] # Add tasks to User schema
 
     class Config:
         from_attributes = True

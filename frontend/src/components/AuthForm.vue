@@ -150,7 +150,9 @@ const handleRegister = async () => {
   loading.value = false;
 };
 
-const validateConfirmPassword = (_rule: any, value: string) => {
+import type { RuleObject } from 'ant-design-vue/es/form/interface';
+
+const validateConfirmPassword = (_rule: RuleObject, value: string) => {
   if (currentMode.value === 'register' && value !== registerFormState.password) {
     return Promise.reject('两次输入的密码不一致！');
   }

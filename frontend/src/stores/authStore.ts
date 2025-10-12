@@ -30,7 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.data.access_token;
       localStorage.setItem('access_token', token.value!);
       axios.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
-      await fetchCurrentUser();
+      // await fetchCurrentUser(); // 移除此处的调用，交由 App.vue 处理
       message.success('登录成功！');
       return true;
     } catch (error: unknown) {
@@ -79,8 +79,13 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.data;
     } catch (error) {
       console.error('获取当前用户失败:', error);
-      // 如果获取用户失败，可能是token过期或无效，强制登出
-      logout();
+      // 仅当错误是 401 未授权时，才执行登出
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        logout();
+      } else {
+        // 对于其他错误 (如网络问题)，只提示，不登出
+        message.error('无法获取用户信息，请检查网络连接。');
+      }
     }
   }
 

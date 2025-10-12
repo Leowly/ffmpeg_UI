@@ -1,48 +1,80 @@
 <!-- src/components/AppSidebar.vue -->
 <template>
-  <div class="app-sidebar">
-    <a-upload-dragger
-      v-model:file-list="fileList"
-      name="file"
-      :action="API_ENDPOINTS.FILE_UPLOAD"
-      :with-credentials="true"
-      @change="handleChange"
-      :before-upload="beforeUpload"
-      :show-upload-list="false"
-      multiple
-      class="upload-area"
-      :headers="uploadHeaders" >
-      <p class="ant-upload-drag-icon">
-        <inbox-outlined />
-      </p>
-      <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
-      <p class="ant-upload-hint">支持视频和音频文件，单文件不超过 4GB</p>
-    </a-upload-dragger>
+  <div class="sidebar-container">
+    <div class="upload-section">
+            <a-upload-dragger
+              v-model:fileList="fileList"
+              name="file"
+              :multiple="true"
+              :show-upload-list="false"
+              :action="uploadUrl"
+              :headers="uploadHeaders"
+              @change="handleUploadChange" @drop="handleDrop"
+            >
+        <p class="ant-upload-drag-icon">
+          <inbox-outlined></inbox-outlined>
+        </p>
+        <p class="ant-upload-text">点击或拖拽文件到此区域以上传</p>
+        <p class="ant-upload-hint">支持单个或批量上传</p>
+      </a-upload-dragger>
+    </div>
 
-    <a-list item-layout="horizontal" :data-source="fileList" class="file-list-container">
-      <template #renderItem="{ item }">
-        <a-list-item
-          :class="{ 'list-item-selected': item.uid === fileStore.selectedFileId }"
-          @click="handleFileSelect(item.uid)"
-        >
-          <a-list-item-meta>
-            <template #title>
-              {{ item.name }}
-            </template>
-            <template #description>
-              <span v-if="item.size">{{ (item.size / 1024 / 1024).toFixed(2) }} MB</span>
-              <a-tag v-if="item.status === 'uploading'" color="blue">上传中</a-tag>
-              <a-tag v-else-if="item.status === 'done'" color="green">已完成</a-tag>
-              <a-tag v-else-if="item.status === 'error'" color="red">失败</a-tag>
-            </template>
-          </a-list-item-meta>
+    <!-- 任务列表 -->
+    <a-divider v-if="fileStore.taskList.length > 0">处理任务</a-divider>
+    <a-list
+      v-if="fileStore.taskList.length > 0"
+      item-layout="horizontal"
+      :data-source="fileStore.taskList"
+      class="task-list-container"
+    >
+      <template #renderItem="{ item: task }">
+        <a-list-item class="task-item">
           <template #actions>
-            <a-tooltip title="删除文件">
-              <a-button type="text" danger @click.stop="removeFile(item.uid)">
-                <delete-outlined />
-              </a-button>
+            <a-tooltip v-if="task.status === 'completed'" title="下载文件">
+              <a @click.prevent="downloadTaskOutput(task.id)"><DownloadOutlined /></a>
+            </a-tooltip>
+            <a-tooltip v-if="task.status === 'failed'" :title="task.details || '未知错误'">
+              <ExclamationCircleOutlined style="color: red" />
             </a-tooltip>
           </template>
+          <a-list-item-meta :description="getTaskDescription(task)">
+            <template #title>
+              <span class="task-title">任务 #{{ task.id }}</span>
+            </template>
+            <template #avatar>
+              <a-spin v-if="task.status === 'processing' || task.status === 'pending'" />
+              <CheckCircleOutlined v-else-if="task.status === 'completed'" style="color: green; font-size: 24px;" />
+              <CloseCircleOutlined v-else-if="task.status === 'failed'" style="color: red; font-size: 24px;" />
+            </template>
+          </a-list-item-meta>
+        </a-list-item>
+      </template>
+    </a-list>
+
+    <!-- 文件列表 -->
+    <a-divider>媒体文件</a-divider>
+    <a-list
+      item-layout="horizontal"
+      :data-source="fileStore.fileList"
+      class="file-list-container"
+    >
+      <template #renderItem="{ item }">
+        <a-list-item
+          @click="() => handleFileSelect(item.id)"
+          :class="{ 'selected-item': fileStore.selectedFileId === item.id }"
+        >
+          <template #actions>
+            <a key="list-load-more-edit" @click.stop="handleDeleteFile(item.id)"><delete-outlined /></a>
+          </template>
+          <a-list-item-meta :description="`${(item.size / 1024 / 1024).toFixed(2)} MB`">
+            <template #title>
+              <a>{{ item.name }}</a>
+            </template>
+            <template #avatar>
+              <video-camera-outlined v-if="item.name.match(/\.(mp4|mov|mkv|avi)$/i)" />
+              <customer-service-outlined v-else />
+            </template>
+          </a-list-item-meta>
         </a-list-item>
       </template>
     </a-list>
@@ -50,192 +82,192 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { message } from 'ant-design-vue'
-import { DeleteOutlined, InboxOutlined } from '@ant-design/icons-vue'
-import axios from 'axios'
-import { API_ENDPOINTS } from '@/api/index'
-import { useFileStore } from '@/stores/fileStore'
-import { useAuthStore } from '@/stores/authStore' // Import auth store
-import type { UploadFile as AntdUploadFile, UploadChangeParam } from 'ant-design-vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { useFileStore, type UserFile, type Task } from '@/stores/fileStore';
+import { useAuthStore } from '@/stores/authStore';
+import { API_ENDPOINTS } from '@/api';
+import { message, type UploadChangeParam } from 'ant-design-vue';
+import {
+  InboxOutlined,
+  VideoCameraOutlined,
+  CustomerServiceOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons-vue';
 
-interface MyUploadFile extends AntdUploadFile {
-  id?: string
-}
+const fileStore = useFileStore();
+const authStore = useAuthStore();
 
-const fileStore = useFileStore()
-const authStore = useAuthStore() // Initialize auth store
-const fileList = ref<MyUploadFile[]>([])
+const fileList = ref<UserFile[]>([]);
 
-const uploadHeaders = computed(() => {
-  if (authStore.token) {
-    return { Authorization: `Bearer ${authStore.token}` }
-  }
-  return {}
-})
+const uploadUrl = computed(() => API_ENDPOINTS.UPLOAD_FILE);
+const uploadHeaders = computed(() => ({
+  Authorization: `Bearer ${authStore.token}`,
+}));
 
-// handleChange 函数保持不变
-const handleChange = (info: UploadChangeParam) => {
-  if (info.file.status === 'done' || info.file.status === 'error') {
-    const isStillUploading = fileList.value.some(file => file.status === 'uploading');
-    if (!isStillUploading) {
-      fetchUserFiles();
+let pollingInterval: number | null = null;
+
+const startPolling = () => {
+  if (pollingInterval) return; // 如果已经在轮询，则不重复启动
+  pollingInterval = window.setInterval(async () => {
+    if (fileStore.hasActiveTasks) {
+      await fileStore.fetchTaskList();
+    } else {
+      stopPolling(); // 如果没有活动任务，则停止轮询
     }
-  }
+  }, 5000); // 每5秒轮询一次
+};
 
-  if (info.file.status === 'done') {
-    message.success(`${info.file.name} 文件上传成功`);
-  } else if (info.file.status === 'error') {
-    const errorMsg = info.file.response?.error || '上传失败';
-    message.error(`${info.file.name} 文件上传失败: ${errorMsg}`);
+const stopPolling = () => {
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
   }
 };
 
-// fetchUserFiles, onMounted, beforeUpload 保持不变
-onMounted(() => {
-  fetchUserFiles()
-})
-
-const fetchUserFiles = async () => {
-  try {
-    const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST, {
-      headers: uploadHeaders.value // Ensure headers are passed for file list as well
-    })
-    fileList.value = response.data
-  } catch (error) {
-    console.error('获取文件列表失败:', error)
-    message.error('同步文件列表失败，请刷新页面重试')
-  }
-}
-
-const beforeUpload = (file: AntdUploadFile) => {
-  const isVideoOrAudio = file.type?.startsWith('video/') || file.type?.startsWith('audio/')
-  if (!isVideoOrAudio) {
-    message.error('只能上传视频或音频文件!')
-    return false
-  }
-  const isLt4G = file.size ? file.size / 1024 / 1024 / 1024 < 4 : true
-  if (!isLt4G) {
-    message.error('文件大小不能超过 4GB!')
-    return false
-  }
-  return true
-}
-
-// 👇 2. 修正核心的 removeFile 函数
-const removeFile = async (uid: string) => {
-  const fileToRemove = fileList.value.find((file) => file.uid === uid)
-  if (!fileToRemove) return
-
-  // 使用 uid 作为 file_id，因为它们现在是相同的
-  const file_id = uid;
-
-  try {
-    await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id), {
-      headers: uploadHeaders.value // Ensure headers are passed for file delete as well
-    })
-    message.success(`文件 '${file_id}' 已从服务器移除`)
-
-    // 从前端列表中移除
-    fileList.value = fileList.value.filter((file) => file.uid !== uid)
-
-    // 👇 3. 核心修正：检查并更新全局 Store！
-    // 如果被删除的文件正是当前选中的文件
-    if (fileStore.selectedFileId === uid) {
-      // 就调用 store 的 action 来清空选择
-      fileStore.selectFile(null)
-    }
-
-  } catch (error) {
-    console.error('删除文件失败:', error)
-    message.error('从服务器删除文件失败，请重试')
-  }
-}
-
-// 移除了 updateFrontendFileList 函数，因为它的逻辑已经合并到 removeFile 中
-
-// handleFileSelect 函数保持不变
-const handleFileSelect = (fileId: string) => {
-  if (fileStore.selectedFileId === fileId) {
-    fileStore.selectFile(null)
+watch(() => fileStore.hasActiveTasks, (hasActive) => {
+  if (hasActive) {
+    startPolling();
   } else {
-    fileStore.selectFile(fileId)
+    stopPolling();
   }
-}
+}, { immediate: true });
+
+onMounted(() => {
+  if (fileStore.hasActiveTasks) {
+    startPolling();
+  }
+});
+
+onBeforeUnmount(() => {
+  stopPolling();
+});
+
+const handleUploadChange = (info: UploadChangeParam) => {
+  if (info.file.status === 'done') {
+    message.success(`${info.file.name} 文件上传成功`);
+    fileStore.addFile(info.file.response as UserFile);
+  } else if (info.file.status === 'error') {
+    message.error(`${info.file.name} 文件上传失败`);
+  }
+};
+
+const handleDrop = (e: DragEvent) => {
+  console.log(e);
+};
+
+const handleFileSelect = (fileId: string) => {
+  fileStore.selectFile(fileId);
+};
+
+const handleDeleteFile = async (fileId: string) => {
+  try {
+    await fileStore.removeFile(fileId);
+    message.success('文件删除成功');
+  } catch {
+    message.error('文件删除失败');
+  }
+};
+
+const getTaskDescription = (task: Task) => {
+  const commandParts = task.ffmpeg_command.split(' ');
+  const outputIndex = commandParts.findIndex(part => part.includes('_processed'));
+  if (outputIndex !== -1) {
+    return `-> ${decodeURIComponent(commandParts[outputIndex].split('/').pop() || '')}`;
+  }
+  return '生成中...';
+};
+
+const downloadTaskOutput = (taskId: number) => {
+  const url = API_ENDPOINTS.DOWNLOAD_TASK(taskId);
+  const token = authStore.token;
+
+  // 使用 fetch 和 headers 来处理认证
+  fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  })
+  .then(async res => {
+    if (res.ok) {
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('content-disposition');
+      let filename = 'downloaded_file';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+        if (filenameMatch && filenameMatch.length > 1) {
+          filename = filenameMatch[1];
+        }
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } else {
+      const errorData = await res.json();
+      message.error(`下载失败: ${errorData.detail || res.statusText}`);
+    }
+  })
+  .catch(err => {
+    message.error(`下载请求失败: ${err}`);
+  });
+};
+
 </script>
 
 <style scoped>
-/* 样式部分保持不变，因为它们已经很好了 */
-.app-sidebar {
-  padding: 20px;
-  background-color: #fff;
-  height: 100%;
-  box-sizing: border-box;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+.sidebar-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  height: 100%;
 }
 
-.app-sidebar h2 {
-  margin: 0;
-  font-size: 1.2em;
-  color: #333;
-  text-align: center;
-}
-
-.upload-area {
-  width: 100%;
-}
-
-:deep(.ant-upload-drag) {
-  padding: 20px 0;
-}
-:deep(.ant-upload-drag-icon .anticon) {
-  font-size: 32px;
-  color: #1890ff;
-}
-:deep(.ant-upload-text) {
-  font-size: 16px;
-}
-:deep(.ant-upload-hint) {
-  font-size: 12px;
-  color: #999;
-}
-
-.file-list-container {
+.file-list-container, .task-list-container {
   flex-grow: 1;
+  overflow-y: auto;
+  margin-top: 16px;
+}
+
+.selected-item {
+  background-color: #e6f7ff;
+  border-right: 3px solid #1890ff;
+}
+
+.task-title {
+  font-weight: 500;
+}
+
+.ant-list-item-meta-description {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px; /* 根据需要调整 */
+}
+.error-log-pre {
+  background-color: #f5f5f5;
+  padding: 12px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60vh;
   overflow-y: auto;
 }
 
-.file-list-container .ant-list-item {
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-.file-list-container .ant-list-item:hover {
-  background-color: #f0f2f5;
-}
-
-.list-item-selected {
-  background-color: #e6f7ff; /* Ant Design 的主题蓝色浅色变体 */
-  border-left: 3px solid #1890ff; /* 左侧蓝色边框 */
-}
-
 @media (max-width: 768px) {
-  /* 直接隐藏图标 */
-  :deep(.upload-area .ant-upload-drag-icon) {
+  .sidebar-container :deep(.ant-upload-drag-icon) {
     display: none;
   }
-
-  /* 让文字居中 */
-  :deep(.upload-area .ant-upload-text) {
-    text-align: center;
+  .sidebar-container :deep(.ant-upload-hint) {
+    display: none;
   }
-
-  :deep(.upload-area.ant-upload-drag) {
-    padding: 0px 0;
+  .sidebar-container :deep(.ant-upload-dragger) {
+    padding: 12px 0;
   }
 }
 </style>
