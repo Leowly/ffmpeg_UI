@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 # 1. 定义数据库URL
 # 优先从环境变量获取，如果没有则使用默认的SQLite地址
-SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL", "sqlite:///./sql_app.db")
+SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL", "sqlite:///./backend/sql_app.db")
 
 # 2. 创建SQLAlchemy引擎
 engine = create_engine(

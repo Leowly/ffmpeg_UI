@@ -2,3 +2,4 @@ uploads/
 .venv/
 __pycache__/
 *.pyc
+sql_app.db

@@ -1,16 +1,40 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
+import { onMounted, watch } from 'vue';
 import AppSidebar from './components/AppSidebar.vue'
 import SingleFileWorkspace from './components/SingleFileWorkspace.vue';
+import AuthForm from './components/AuthForm.vue';
+import { useAuthStore } from './stores/authStore';
+import { useFileStore } from './stores/fileStore';
+import { LogoutOutlined } from '@ant-design/icons-vue';
+
+const authStore = useAuthStore();
+const fileStore = useFileStore();
+
+onMounted(() => {
+  // 尝试在应用加载时获取当前用户，以验证token并设置isLoggedIn状态
+  authStore.fetchCurrentUser();
+});
+
+// 监听登录状态变化，当用户登录后同步文件列表
+watch(() => authStore.isLoggedIn, (newVal) => {
+  if (newVal) {
+    fileStore.fetchFileList();
+  }
+}, { immediate: true });
 </script>
 
 <template>
-  <div class="app-layout">
+  <AuthForm v-if="!authStore.isLoggedIn" />
+  <div v-else class="app-layout">
     <div class="sidebar">
       <AppSidebar />
+      <a-button v-if="authStore.isLoggedIn" @click="authStore.logout" type="primary" danger block style="margin-top: 20px;">
+        <template #icon><LogoutOutlined /></template>
+        退出登录
+      </a-button>
     </div>
     <main class="main-content">
-      <!-- 👇 2. 在这里使用新组件 -->
       <SingleFileWorkspace />
     </main>
   </div>
@@ -35,6 +59,8 @@ import SingleFileWorkspace from './components/SingleFileWorkspace.vue';
   /* 👇 允许侧边栏自身滚动 */
   overflow-y: auto;
   flex-shrink: 0; /* 防止侧边栏被挤压 */
+  display: flex; /* 使内部元素垂直排列 */
+  flex-direction: column;
 }
 
 .main-content {

@@ -11,7 +11,7 @@
       :show-upload-list="false"
       multiple
       class="upload-area"
-    >
+      :headers="uploadHeaders" >
       <p class="ant-upload-drag-icon">
         <inbox-outlined />
       </p>
@@ -50,22 +50,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { DeleteOutlined, InboxOutlined } from '@ant-design/icons-vue'
 import axios from 'axios'
 import { API_ENDPOINTS } from '@/api/index'
 import { useFileStore } from '@/stores/fileStore'
+import { useAuthStore } from '@/stores/authStore' // Import auth store
 import type { UploadFile as AntdUploadFile, UploadChangeParam } from 'ant-design-vue'
 
 interface MyUploadFile extends AntdUploadFile {
   id?: string
 }
 
-const fileStore = useFileStore() // 只保留 Pinia store
+const fileStore = useFileStore()
+const authStore = useAuthStore() // Initialize auth store
 const fileList = ref<MyUploadFile[]>([])
-//  👇 1. 删除这个无用的、会引起混淆的局部 ref
-// const selectedFileUid = ref<string | null>(null)
+
+const uploadHeaders = computed(() => {
+  if (authStore.token) {
+    return { Authorization: `Bearer ${authStore.token}` }
+  }
+  return {}
+})
 
 // handleChange 函数保持不变
 const handleChange = (info: UploadChangeParam) => {
@@ -91,7 +98,9 @@ onMounted(() => {
 
 const fetchUserFiles = async () => {
   try {
-    const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST)
+    const response = await axios.get<MyUploadFile[]>(API_ENDPOINTS.FILE_LIST, {
+      headers: uploadHeaders.value // Ensure headers are passed for file list as well
+    })
     fileList.value = response.data
   } catch (error) {
     console.error('获取文件列表失败:', error)
@@ -122,7 +131,9 @@ const removeFile = async (uid: string) => {
   const file_id = uid;
 
   try {
-    await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id))
+    await axios.delete(API_ENDPOINTS.FILE_DELETE(file_id), {
+      headers: uploadHeaders.value // Ensure headers are passed for file delete as well
+    })
     message.success(`文件 '${file_id}' 已从服务器移除`)
 
     // 从前端列表中移除
