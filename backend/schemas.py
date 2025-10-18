@@ -59,13 +59,15 @@ class TaskBase(BaseModel):
     ffmpeg_command: str
 
 class TaskCreate(TaskBase):
-    output_path: str
+    # output_path is generated server-side, do not accept from client
+    pass
 
 class Task(TaskBase):
     id: int
     status: str
     details: Optional[str] = None
     output_path: Optional[str] = None # 新增
+    progress: Optional[int] = 0
     owner_id: int
 
     class Config:

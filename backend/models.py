@@ -31,6 +31,7 @@ class ProcessingTask(Base):
     # 使用 text 类型以存储可能很长的 ffmpeg 命令
     ffmpeg_command = Column(Text, nullable=False)
     output_path = Column(String, nullable=True) # 新增：用于存储输出文件路径
+    progress = Column(Integer, default=0) # 0-100 百分比进度
     # pending, processing, completed, failed
     status = Column(String, default="pending", index=True)
     details = Column(Text, nullable=True) # 用于存储日志或错误信息

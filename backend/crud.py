@@ -67,12 +67,17 @@ def create_task(db: Session, task: schemas.TaskCreate, owner_id: int, output_pat
     db.refresh(db_task)
     return db_task
 
-def update_task(db: Session, task_id: int, status: str, details: str | None = None):
+def update_task(db: Session, task_id: int, status: str, details: str | None = None, progress: int | None = None):
     db_task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
     if db_task:
         db_task.status = status
         if details:
             db_task.details = details
+        if progress is not None:
+            try:
+                db_task.progress = int(progress)
+            except Exception:
+                pass
         db.commit()
         db.refresh(db_task)
     return db_task

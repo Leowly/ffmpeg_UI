@@ -4,7 +4,18 @@ import uuid
 import subprocess
 import json
 import asyncio
+import logging
+import shlex
+import sys
 from typing import cast, List
+
+if sys.platform == "win32":
+    print(">>> Gemini: Running on Windows. Attempting to set Proactor event loop policy...")
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    print(">>> Gemini: Policy set to Proactor.")
+else:
+    print(f">>> Gemini: Running on non-Windows platform ({sys.platform}), no policy change needed.")
+
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -39,38 +50,122 @@ app.add_middleware(
 )
 
 # --- Configuration ---
-UPLOAD_DIRECTORY = "./backend/uploads"
+UPLOAD_DIRECTORY = "./backend/workspaces"
 # Ensure the upload directory exists
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
-# --- Background Task Runner ---
-async def run_ffmpeg_process(task_id: int, command: str, db_path: str):
+async def run_ffmpeg_process(
+    task_id: int, 
+    command_args: list, 
+    total_duration: float, 
+    db_path: str, 
+    display_command: str = "", 
+    temp_output_path: str = "", 
+    final_output_path: str = ""
+):
     """
     一个在后台运行 ffmpeg 命令的函数。
-    注意：这个函数在一个独立的线程中运行，因此需要它自己的数据库会话。
+    它将输出写入一个临时文件，成功后，将其重命名为最终文件名，
+    并为这个新文件在数据库中创建一条记录。
     """
-    # 为后台任务创建新的数据库会话
     from .database import SessionLocal as TaskSessionLocal
     db = TaskSessionLocal()
+
+    logger = logging.getLogger("ffmpeg_runner")
+    if not logger.handlers:
+        logging.basicConfig(level=logging.INFO)
+
     try:
-        # 1. 更新任务状态为 "processing"
+        print(f"run_ffmpeg_process: start task_id={task_id} display_command={display_command}")
+        logger.info(f"run_ffmpeg_process: start task_id={task_id}")
+        
         crud.update_task(db, task_id=task_id, status="processing")
 
-        # 2. 执行 ffmpeg 命令
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
+        import re
+        time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
 
-        # 3. 根据结果更新任务状态
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        
+        proc = await asyncio.create_subprocess_exec(
+            *command_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=project_root
+        )
+
+        if proc is None:
+            raise RuntimeError("Failed to create subprocess")
+
+        stderr_lines: list[str] = []
+        last_progress = -1
+
+        # 实时读取和解析 stderr
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            s = line.decode(errors='ignore')
+            logger.info(s.strip())
+            stderr_lines.append(s)
+            m = time_re.search(s)
+            if m:
+                try:
+                    h, mm = int(m.group(1)), int(m.group(2))
+                    ss = float(m.group(3))
+                    elapsed = h * 3600 + mm * 60 + ss
+                    if total_duration and total_duration > 0:
+                        progress = int(min(100, (elapsed / total_duration) * 100))
+                        if progress != last_progress:
+                            crud.update_task(db, task_id=task_id, status="processing", progress=progress, details=''.join(stderr_lines[-20:]))
+                            last_progress = progress
+                except Exception:
+                    pass
+
+        stdout, stderr = await proc.communicate()
+        full_stderr = ''.join(stderr_lines) + (stderr.decode(errors='ignore') if stderr else '')
+
+        # --- 根据结果执行后处理 ---
         if proc.returncode == 0:
-            crud.update_task(db, task_id=task_id, status="completed", details=stdout.decode())
+            # 成功：重命名文件，并在数据库中创建新文件记录
+            try:
+                # 1. 将临时文件重命名为最终的目标文件名
+                #    如果最终文件已存在，先删除它，以确保重命名成功
+                if os.path.exists(final_output_path):
+                    os.remove(final_output_path)
+                os.rename(temp_output_path, final_output_path)
+                
+                # 2. 在数据库中为这个新处理好的文件创建一条记录
+                from . import schemas, crud
+                task = crud.get_task(db, task_id)
+                if task:
+                    new_file_schema = schemas.FileCreate(
+                        filename=os.path.basename(final_output_path),
+                        filepath=final_output_path,
+                        status="processed"  # 使用一个新状态来标识
+                    )
+                    crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
+                
+                # 3. 更新任务状态为 "completed"
+                crud.update_task(db, task_id=task_id, status="completed", details=full_stderr or stdout.decode(errors='ignore'), progress=100)
+                logger.info(f"Task {task_id} completed successfully. Output at: {final_output_path}")
+
+            except Exception as e:
+                # 如果重命名或数据库操作失败，这是一个严重错误
+                error_msg = f"FFmpeg processing succeeded, but post-processing failed: {e!r}"
+                logger.error(error_msg)
+                crud.update_task(db, task_id=task_id, status="failed", details=error_msg)
+                # 尝试删除临时文件，避免留存垃圾文件
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
         else:
-            error_details = stderr.decode()
-            crud.update_task(db, task_id=task_id, status="failed", details=error_details)
+            # 失败：更新任务状态，并删除无用的临时文件
+            crud.update_task(db, task_id=task_id, status="failed", details=full_stderr, progress=0)
+            if os.path.exists(temp_output_path):
+                os.remove(temp_output_path)
+            logger.error(f"Task {task_id} failed. FFmpeg stderr: {full_stderr}")
+
     except Exception as e:
+        logger.error(f"An exception occurred in run_ffmpeg_process for task {task_id}: {e!r}", exc_info=True)
         crud.update_task(db, task_id=task_id, status="failed", details=str(e))
     finally:
         db.close()
@@ -262,7 +357,6 @@ def download_file(
 
     return FileResponse(path=file_path, filename=db_file.filename, media_type="application/octet-stream")
 
-
 @app.post("/api/process", response_model=List[schemas.Task], tags=["Files"])
 async def process_files(
     payload: schemas.ProcessPayload,
@@ -272,59 +366,109 @@ async def process_files(
 ):
     """
     接收一个或多个文件及处理参数，为每个文件创建一个后台 FFmpeg 处理任务。
+    处理后的文件将以 "_processed" 后缀保存在同一目录下，并作为新文件添加到用户的文件列表。
     """
     created_tasks = []
-    # 为这个请求创建一个唯一的输出子目录
-    output_subdir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id), "processed", str(uuid.uuid4()))
-    os.makedirs(output_subdir, exist_ok=True)
-
+    # debug: print incoming payload
+    print(f"process_files called by user={current_user.username} payload_files={payload.files} container={payload.container}")
+    logging.getLogger("ffmpeg_runner").info(f"process_files payload: {payload}")
+    
     for file_id_str in payload.files:
         try:
             file_id = int(file_id_str)
         except ValueError:
-            # 在循环中跳过无效ID，或收集错误信息
+            # 在循环中跳过无效ID
             continue
 
         db_file = crud.get_file_by_id(db, file_id=file_id)
         if not db_file or db_file.owner_id != current_user.id:
-            continue # 跳过不属于此用户的文
+            print(f"process_files: file id {file_id} not owned by user {current_user.id}, skipping")
+            logging.getLogger("ffmpeg_runner").warning(f"file id {file_id} not owned by user {current_user.id}, skipping")
+            continue
 
-        # --- 动态构建 FFmpeg 命令 ---
-        input_path = db_file.filepath
-        original_filename = os.path.splitext(db_file.filename)[0]
-        output_filename = f"{original_filename}_processed.{payload.container}"
-        output_path = os.path.join(output_subdir, output_filename)
+        # --- 动态构建 FFmpeg 命令 (新逻辑) ---
+        input_path = os.path.normpath(db_file.filepath)
+        
+        # 1. 获取不带扩展名的原始文件名和扩展名
+        original_filename_base, _ = os.path.splitext(db_file.filename)
 
-        command = ["ffmpeg", "-i", input_path]
+        # 2. 构造带有 "_processed" 后缀的最终目标文件名
+        final_output_filename = f"{original_filename_base}_processed.{payload.container}"
+        
+        # 3. 确定最终处理完成后的文件在磁盘上的完整路径
+        final_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), final_output_filename))
+        
+        # 4. 创建一个临时的、唯一的输出路径，FFmpeg 将先写入这里
+        temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
+        temp_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), temp_output_filename))
 
-        # 1. 时间裁剪
-        if payload.startTime > 0 or payload.endTime < payload.totalDuration:
-            command.extend(["-ss", str(payload.startTime), "-to", str(payload.endTime)])
+        # 5. 构建 FFmpeg 命令列表
+        #    使用 -y 参数可以在开发或重试时自动覆盖同名的临时文件
+        command = ["ffmpeg", "-y"]
 
-        # 2. 视频编码
+        # 时间裁剪 (Input seeking for speed and accuracy)
+        if payload.startTime > 0:
+            command.extend(["-ss", str(payload.startTime)])
+
+        # 探测选项
+        command.extend(["-probesize", "5M", "-analyzeduration", "10M"])
+
+        # 输入文件
+        command.extend(["-i", input_path])
+
+        # 设置时长
+        if payload.endTime < payload.totalDuration:
+            duration = payload.endTime - payload.startTime
+            if duration > 0:
+                command.extend(["-t", str(duration)])
+
+        # 可选的流映射
+        command.extend(["-map", "0:v?", "-map", "0:a?"])
+
+        # 视频编码
         command.extend(["-c:v", payload.videoCodec])
         if payload.videoCodec != 'copy':
+            command.extend(["-pix_fmt", "yuv420p"])
             if payload.videoBitrate:
                 command.extend(["-b:v", f"{payload.videoBitrate}k"])
             if payload.resolution:
                 command.extend(["-s", f"{payload.resolution.width}x{payload.resolution.height}"])
         
-        # 3. 音频编码
+        # 音频编码
         command.extend(["-c:a", payload.audioCodec])
         if payload.audioCodec != 'copy' and payload.audioBitrate:
             command.extend(["-b:a", f"{payload.audioBitrate}k"])
 
-        # 4. 输出路径
-        command.append(output_path)
+        # 6. 输出路径（关键：指向临时文件）
+        command.append(temp_output_path)
 
-        ffmpeg_command_str = " ".join(command)
+        # 构造一个用于显示/存入 DB 的可读命令字符串
+        if sys.platform == "win32":
+            ffmpeg_command_str = subprocess.list2cmdline(command)
+        else:
+            ffmpeg_command_str = " ".join(shlex.quote(p) for p in command)
+
+        logging.getLogger("ffmpeg_runner").info(f"Creating task for file_id={file_id} input={input_path} temp_output={temp_output_path} final_output={final_output_path}")
+        logging.getLogger("ffmpeg_runner").info(f"FFmpeg command string: {ffmpeg_command_str}")
 
         # --- 创建数据库任务记录 ---
-        task_in = schemas.TaskCreate(ffmpeg_command=ffmpeg_command_str, output_path=output_path)
-        db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=output_path)
+        task_in = schemas.TaskCreate(ffmpeg_command=ffmpeg_command_str)
+        # 关键：我们将 `final_output_path` 存入数据库，这是任务最终产物的路径
+        db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=final_output_path)
 
         # --- 添加到后台任务队列 ---
-        background_tasks.add_task(run_ffmpeg_process, db_task.id, ffmpeg_command_str, db_path=DB_PATH)
+        logging.getLogger("ffmpeg_runner").info(f"Queuing background task id={db_task.id}")
+        # 传入所有需要的路径参数到后台任务
+        background_tasks.add_task(
+            run_ffmpeg_process, 
+            db_task.id, 
+            command, 
+            payload.totalDuration, 
+            db_path=DB_PATH, 
+            display_command=ffmpeg_command_str, 
+            temp_output_path=temp_output_path,
+            final_output_path=final_output_path
+        )
 
         created_tasks.append(db_task)
 
@@ -346,27 +490,7 @@ def get_tasks(
     return crud.get_user_tasks(db, owner_id=current_user.id)
 
 
-@app.get("/api/download-task/{task_id}", tags=["Tasks"])
-def download_task_output(
-    task_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """下载已完成任务的输出文件"""
-    task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
 
-    if not task or task.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Task not found or not owned by user")
-
-    if task.status != 'completed':
-        raise HTTPException(status_code=400, detail="Task is not completed yet")
-
-    if not task.output_path or not os.path.exists(task.output_path):
-        raise HTTPException(status_code=404, detail="Output file not found on server")
-
-    # 从输出路径中提取原始文件名作为下载时的文件名
-    output_filename = os.path.basename(task.output_path)
-    return FileResponse(path=task.output_path, filename=output_filename, media_type="application/octet-stream")
 
 
 @app.get("/api/task-status/{taskId}", tags=["Files"])
@@ -436,7 +560,7 @@ def upload_file(
         user_upload_directory = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
         os.makedirs(user_upload_directory, exist_ok=True)
 
-        file_location = os.path.join(user_upload_directory, unique_filename)
+        file_location = os.path.normpath(os.path.join(user_upload_directory, unique_filename))
 
         with open(file_location, "wb") as buffer:
             buffer.write(file.file.read())
