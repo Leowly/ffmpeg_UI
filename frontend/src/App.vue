@@ -26,9 +26,7 @@ const handleExportClick = () => {
 };
 
 onMounted(() => {
-  // 移除 onMounted 中的 fetchCurrentUser 调用，
-  // 因为 watch immediate:true 已经会在加载时执行一次
-  // authStore.fetchCurrentUser();
+  fileStore.initializeStore();
 });
 
 watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {

@@ -7,15 +7,16 @@ import asyncio
 import logging
 import shlex
 import sys
-from typing import cast, List
+from typing import cast, List, Tuple
 
+# 策略设置现在由 run.py 处理，但保留在这里也无害
 if sys.platform == "win32":
     print(">>> Gemini: Running on Windows. Attempting to set Proactor event loop policy...")
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    print(">>> Gemini: Policy set to Proactor.")
-else:
-    print(f">>> Gemini: Running on non-Windows platform ({sys.platform}), no policy change needed.")
-
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        print(">>> Gemini: Policy set to Proactor.")
+    except Exception as e:
+        print(f">>> Gemini: Could not set Proactor policy: {e}")
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -26,7 +27,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import crud, models, schemas, security
 from .database import SessionLocal, engine, DB_PATH
 
-# This line creates the database tables if they don't exist
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -36,11 +36,7 @@ app = FastAPI(
 )
 
 # --- CORS Configuration ---
-origins = [
-    "http://localhost",
-    "http://localhost:5173",  # Frontend development server
-]
-
+origins = ["http://localhost", "http://localhost:5173"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -51,121 +47,148 @@ app.add_middleware(
 
 # --- Configuration ---
 UPLOAD_DIRECTORY = "./backend/workspaces"
-# Ensure the upload directory exists
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
+# --- 核心修改：新的阻塞式 FFmpeg 执行函数 ---
+def run_ffmpeg_blocking(
+    command_args: list, task_id: int, total_duration: float
+) -> Tuple[bool, str]:
+    """
+    在一个独立的线程中执行的、阻塞的 FFmpeg 函数。
+    这避免了与 asyncio 事件循环的直接冲突。
+    返回一个元组 (success: bool, full_stderr: str)
+    """
+    from .database import SessionLocal as TaskSessionLocal
+    from . import crud
+    import re
+
+    db = TaskSessionLocal()
+    time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
+    logger = logging.getLogger("ffmpeg_runner")
+
+    try:
+        # 使用经典的 subprocess.Popen，它在任何环境下都能工作
+        proc = subprocess.Popen(
+            command_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,  # 使用 text=True 自动解码
+            errors='ignore',
+            # 在Windows上隐藏命令行窗口
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+        stderr_lines: list[str] = []
+        last_progress = -1
+
+        # 逐行读取 stderr。因为在后台线程，这里的阻塞是安全的。
+        if proc.stderr:
+            for line in iter(proc.stderr.readline, ""):
+                if not line:
+                    break
+                logger.info(line.strip())
+                stderr_lines.append(line)
+                m = time_re.search(line)
+                if m:
+                    try:
+                        h, mm, ss = int(m.group(1)), int(m.group(2)), float(m.group(3))
+                        elapsed = h * 3600 + mm * 60 + ss
+                        if total_duration > 0:
+                            progress = int(min(100, (elapsed / total_duration) * 100))
+                            if progress != last_progress:
+                                # 注意：频繁的数据库写入可能会成为瓶颈，但对于单个任务是可接受的
+                                crud.update_task(db, task_id=task_id, status="processing", progress=progress, details=''.join(stderr_lines[-20:]))
+                                last_progress = progress
+                    except Exception:
+                        pass
+        
+        # 等待进程结束
+        proc.wait()
+        full_stderr = "".join(stderr_lines)
+
+        if proc.returncode == 0:
+            return True, full_stderr
+        else:
+            # 如果 proc.stderr 为空，尝试读取 stdout 获取错误信息
+            if not full_stderr and proc.stdout:
+                full_stderr = proc.stdout.read()
+            return False, full_stderr
+
+    except Exception as e:
+        logger.error(f"Exception in blocking runner for task {task_id}: {e!r}", exc_info=True)
+        return False, str(e)
+    finally:
+        db.close()
+
+
+# --- 核心修改：重构后的异步任务包装器 ---
 async def run_ffmpeg_process(
     task_id: int, 
     command_args: list, 
     total_duration: float, 
-    db_path: str, 
     display_command: str = "", 
     temp_output_path: str = "", 
     final_output_path: str = ""
 ):
     """
-    一个在后台运行 ffmpeg 命令的函数。
-    它将输出写入一个临时文件，成功后，将其重命名为最终文件名，
-    并为这个新文件在数据库中创建一条记录。
+    异步包装器，使用 run_in_executor 将阻塞的 FFmpeg 任务移到后台线程。
     """
     from .database import SessionLocal as TaskSessionLocal
-    db = TaskSessionLocal()
+    from . import crud, schemas
 
+    db = TaskSessionLocal()
     logger = logging.getLogger("ffmpeg_runner")
     if not logger.handlers:
         logging.basicConfig(level=logging.INFO)
 
     try:
-        print(f"run_ffmpeg_process: start task_id={task_id} display_command={display_command}")
-        logger.info(f"run_ffmpeg_process: start task_id={task_id}")
-        
+        logger.info(f"run_ffmpeg_process: start task_id={task_id}, command={display_command}")
         crud.update_task(db, task_id=task_id, status="processing")
 
-        import re
-        time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
-
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        loop = asyncio.get_running_loop()
         
-        proc = await asyncio.create_subprocess_exec(
-            *command_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=project_root
+        # 将阻塞函数和其参数传递给执行器
+        success, full_stderr = await loop.run_in_executor(
+            None,  # 使用默认的 ThreadPoolExecutor
+            run_ffmpeg_blocking,
+            command_args,
+            task_id,
+            total_duration
         )
 
-        if proc is None:
-            raise RuntimeError("Failed to create subprocess")
-
-        stderr_lines: list[str] = []
-        last_progress = -1
-
-        # 实时读取和解析 stderr
-        while True:
-            line = await proc.stderr.readline()
-            if not line:
-                break
-            s = line.decode(errors='ignore')
-            logger.info(s.strip())
-            stderr_lines.append(s)
-            m = time_re.search(s)
-            if m:
-                try:
-                    h, mm = int(m.group(1)), int(m.group(2))
-                    ss = float(m.group(3))
-                    elapsed = h * 3600 + mm * 60 + ss
-                    if total_duration and total_duration > 0:
-                        progress = int(min(100, (elapsed / total_duration) * 100))
-                        if progress != last_progress:
-                            crud.update_task(db, task_id=task_id, status="processing", progress=progress, details=''.join(stderr_lines[-20:]))
-                            last_progress = progress
-                except Exception:
-                    pass
-
-        stdout, stderr = await proc.communicate()
-        full_stderr = ''.join(stderr_lines) + (stderr.decode(errors='ignore') if stderr else '')
-
-        # --- 根据结果执行后处理 ---
-        if proc.returncode == 0:
-            # 成功：重命名文件，并在数据库中创建新文件记录
+        if success:
+            logger.info(f"Task {task_id} blocking process completed successfully.")
             try:
-                # 1. 将临时文件重命名为最终的目标文件名
-                #    如果最终文件已存在，先删除它，以确保重命名成功
                 if os.path.exists(final_output_path):
                     os.remove(final_output_path)
                 os.rename(temp_output_path, final_output_path)
                 
-                # 2. 在数据库中为这个新处理好的文件创建一条记录
-                from . import schemas, crud
                 task = crud.get_task(db, task_id)
                 if task:
                     new_file_schema = schemas.FileCreate(
                         filename=os.path.basename(final_output_path),
                         filepath=final_output_path,
-                        status="processed"  # 使用一个新状态来标识
+                        status="processed"
                     )
                     crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
                 
-                # 3. 更新任务状态为 "completed"
-                crud.update_task(db, task_id=task_id, status="completed", details=full_stderr or stdout.decode(errors='ignore'), progress=100)
-                logger.info(f"Task {task_id} completed successfully. Output at: {final_output_path}")
+                crud.update_task(db, task_id=task_id, status="completed", details=full_stderr, progress=100)
+                logger.info(f"Task {task_id} post-processing finished. Output: {final_output_path}")
 
             except Exception as e:
-                # 如果重命名或数据库操作失败，这是一个严重错误
-                error_msg = f"FFmpeg processing succeeded, but post-processing failed: {e!r}"
-                logger.error(error_msg)
+                error_msg = f"FFmpeg succeeded, but post-processing failed: {e!r}"
+                logger.error(error_msg, exc_info=True)
                 crud.update_task(db, task_id=task_id, status="failed", details=error_msg)
-                # 尝试删除临时文件，避免留存垃圾文件
                 if os.path.exists(temp_output_path):
                     os.remove(temp_output_path)
         else:
-            # 失败：更新任务状态，并删除无用的临时文件
+            logger.error(f"Task {task_id} blocking process failed. Stderr: {full_stderr}")
             crud.update_task(db, task_id=task_id, status="failed", details=full_stderr, progress=0)
             if os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
-            logger.error(f"Task {task_id} failed. FFmpeg stderr: {full_stderr}")
 
     except Exception as e:
-        logger.error(f"An exception occurred in run_ffmpeg_process for task {task_id}: {e!r}", exc_info=True)
+        logger.error(f"Exception in async wrapper for task {task_id}: {e!r}", exc_info=True)
         crud.update_task(db, task_id=task_id, status="failed", details=str(e))
     finally:
         db.close()
@@ -464,12 +487,10 @@ async def process_files(
             db_task.id, 
             command, 
             payload.totalDuration, 
-            db_path=DB_PATH, 
             display_command=ffmpeg_command_str, 
             temp_output_path=temp_output_path,
             final_output_path=final_output_path
         )
-
         created_tasks.append(db_task)
 
     if not created_tasks:

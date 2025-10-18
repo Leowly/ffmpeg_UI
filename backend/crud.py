@@ -56,6 +56,12 @@ def delete_file(db: Session, file_id: int):
 def get_user_tasks(db: Session, owner_id: int):
     return db.query(models.ProcessingTask).filter(models.ProcessingTask.owner_id == owner_id).all()
 
+def get_task(db: Session, task_id: int):
+    """
+    根据任务ID从数据库中获取单个任务。
+    """
+    return db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
+
 def create_task(db: Session, task: schemas.TaskCreate, owner_id: int, output_path: str):
     db_task = models.ProcessingTask(
         **task.model_dump(), 

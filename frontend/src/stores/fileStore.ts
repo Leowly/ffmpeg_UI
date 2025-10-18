@@ -1,6 +1,6 @@
 // src/stores/fileStore.ts
 import { defineStore } from 'pinia'
-import { ref, type Ref, computed } from 'vue'
+import { ref, type Ref, computed, onUnmounted } from 'vue'
 import axios, { isAxiosError } from 'axios'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
@@ -11,7 +11,7 @@ export interface UserFile {
   uid: string
   id: string
   name: string
-  status: 'done' | 'uploading' | 'error'
+  status: 'done' | 'uploading' | 'error' | 'processing' | 'processed'
   size: number
   response: {
     file_id: string
@@ -60,34 +60,33 @@ export interface Task {
 
 export const useFileStore = defineStore('file', () => {
   // --- State ---
-
-  // 文件列表相关
   const fileList: Ref<UserFile[]> = ref([])
   const selectedFileId = ref<string | null>(null)
-  const taskList: Ref<Task[]> = ref([]) // 新增：任务列表
-
-  // 单个文件详细信息相关 (之前在 SingleFileWorkspace 组件中)
+  const taskList: Ref<Task[]> = ref([])
   const isLoading = ref(false)
   const fileInfo = ref<FFProbeResult | null>(null)
   const error = ref<string | null>(null)
-
-  // 文件裁剪时间相关
   const startTime = ref(0)
   const endTime = ref(0)
 
-  // --- Getters ---
+  // 用于轮询的定时器ID，这是管理轮询的核心
+  const taskPoller: Ref<number | null> = ref(null)
 
+  // --- Getters ---
   const totalDuration = computed(() => {
     return fileInfo.value ? parseFloat(fileInfo.value.format.duration) : 0
   })
 
+  // 计算属性，用于判断当前是否有任务在 'pending' 或 'processing' 状态
   const hasActiveTasks = computed(() => {
     return taskList.value.some(task => ['pending', 'processing'].includes(task.status));
   });
 
   // --- Actions ---
 
-  // 从后端获取并更新文件列表
+  /**
+   * 从后端获取并更新文件列表
+   */
   async function fetchFileList() {
     try {
       const response = await axios.get<UserFile[]>(API_ENDPOINTS.FILE_LIST)
@@ -98,32 +97,92 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
-  // 新增：从后端获取并更新任务列表
+  /**
+   * 从后端获取任务列表。
+   * 此函数现在包含核心逻辑：对比新旧任务状态，以决定是否刷新文件列表。
+   */
   async function fetchTaskList() {
+    const oldTaskStatus = new Map(taskList.value.map(task => [task.id, task.status]));
+
     try {
       const response = await axios.get<Task[]>(API_ENDPOINTS.TASK_LIST);
       taskList.value = response.data;
+
+      let justCompleted = false;
+      // 检查是否有任务状态从 'processing' 变为 'completed'
+      for (const task of taskList.value) {
+        if (oldTaskStatus.get(task.id) === 'processing' && task.status === 'completed') {
+          justCompleted = true;
+          const fileName = task.output_path?.split('\\').pop()?.split('/').pop() || `任务 #${task.id}`;
+          message.success(`文件 "${fileName}" 已处理完成!`);
+        } else if (oldTaskStatus.get(task.id) !== 'failed' && task.status === 'failed') {
+          const fileName = task.output_path?.split('\\').pop()?.split('/').pop() || `任务 #${task.id}`;
+          message.error(`文件 "${fileName}" 处理失败。`);
+        }
+      }
+
+      // 如果有任务刚刚完成，则刷新文件列表以显示新文件
+      if (justCompleted) {
+        await fetchFileList();
+      }
+
+      // 如果所有任务都完成了，轮询器会自动停止（见 startTaskPolling）
+      if (!hasActiveTasks.value) {
+        stopTaskPolling();
+      }
+
     } catch (error) {
       console.error('Failed to fetch task list:', error);
+      stopTaskPolling(); // 发生错误时也停止轮询，防止无限循环
     }
   }
 
-  // 获取单个文件的详细信息
+  /**
+   * 启动任务状态轮询
+   */
+  function startTaskPolling() {
+    // 防止重复启动轮询
+    if (taskPoller.value) return;
+
+    console.log(">>> [FileStore] Starting task polling...");
+    taskPoller.value = window.setInterval(async () => {
+      // 只要还有活动任务，就一直获取最新任务列表
+      if (hasActiveTasks.value) {
+        await fetchTaskList();
+      } else {
+        // 当没有活动任务时，自动停止轮询
+        stopTaskPolling();
+      }
+    }, 3000); // 每3秒查询一次
+  }
+
+  /**
+   * 停止任务状态轮询
+   */
+  function stopTaskPolling() {
+    if (taskPoller.value) {
+      console.log(">>> [FileStore] Stopping task polling.");
+      clearInterval(taskPoller.value);
+      taskPoller.value = null;
+    }
+  }
+
+  /**
+   * 获取单个文件的详细信息 (ffprobe)
+   */
   async function fetchFileInfo(fileId: string) {
     isLoading.value = true
     error.value = null
-
     try {
       const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
       fileInfo.value = response.data
-      // 成功获取信息后，重置裁剪时间
       const duration = parseFloat(response.data.format.duration)
       startTime.value = 0
       endTime.value = isNaN(duration) ? 0 : duration
     } catch (err: unknown) {
       let errorMessage = '无法连接到服务器或发生未知错误'
       if (isAxiosError(err)) {
-        errorMessage = err.response?.data?.error || err.message
+        errorMessage = err.response?.data?.detail || err.message
       } else if (err instanceof Error) {
         errorMessage = err.message
       }
@@ -134,69 +193,92 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
-  // 选中一个文件，并触发信息获取
+  /**
+   * 选中一个文件，并触发信息获取
+   */
   function selectFile(fileId: string | null) {
     selectedFileId.value = fileId
     if (fileId) {
       fetchFileInfo(fileId)
     } else {
-      // 如果取消选择，则清空文件详情
       fileInfo.value = null
       error.value = null
     }
   }
 
-  // 添加一个文件到列表 (上传成功后调用)
+  /**
+   * 上传成功后，在前端列表中添加一个文件
+   */
   function addFile(file: UserFile) {
-    fileList.value.push(file)
+    // 避免重复添加
+    if (!fileList.value.some(f => f.id === file.id)) {
+      fileList.value.push(file);
+    }
   }
 
-  // 新增：添加多个任务到列表
+  /**
+   * 当用户发起处理请求后，将新任务添加到列表，并确保轮询已启动
+   */
   function addTasks(tasks: Task[]) {
+    // 使用 unshift 将新任务放在列表顶部
     taskList.value.unshift(...tasks);
+    // 如果有活动任务，立即启动轮询
+    if (hasActiveTasks.value) {
+      startTaskPolling();
+    }
   }
 
-  // 从列表中移除一个文件 (删除成功后调用)
+  /**
+   * 从服务器和前端列表中删除一个文件
+   */
   async function removeFile(fileId: string) {
     try {
       await axios.delete(API_ENDPOINTS.DELETE_FILE(fileId));
       fileList.value = fileList.value.filter((f) => f.id !== fileId);
       if (selectedFileId.value === fileId) {
-        selectFile(null); // 如果删除的是当前选中的文件，则取消选中
+        selectFile(null);
       }
+      message.success('文件删除成功');
     } catch (error) {
+      message.error('文件删除失败');
       console.error('Failed to delete file:', error);
-      // 抛出错误，以便 UI 层可以捕获并显示消息
-      throw error;
+      throw error; // 重新抛出错误，以便UI层可以捕获
     }
   }
 
-  // 更新裁剪时间
+  /**
+   * 更新裁剪时间
+   */
   function updateTrimTimes({ start, end }: { start: number; end: number }) {
     startTime.value = start
     endTime.value = end
   }
 
+  /**
+   * Store初始化/应用启动时的逻辑
+   */
+  async function initializeStore() {
+    await fetchFileList();
+    await fetchTaskList();
+    // 如果初始加载后发现有未完成的任务，则启动轮询
+    if (hasActiveTasks.value) {
+      startTaskPolling();
+    }
+  }
+
+  // 确保在应用卸载时清除定时器，防止内存泄漏
+  onUnmounted(() => {
+    stopTaskPolling();
+  });
+
+  // --- 返回暴露给组件的 state, getters, 和 actions ---
   return {
     // State
-    selectedFileId,
-    fileList,
-    taskList,
-    isLoading,
-    fileInfo,
-    error,
-    startTime,
-    endTime,
+    selectedFileId, fileList, taskList, isLoading, fileInfo, error, startTime, endTime,
     // Getters
-    totalDuration,
-    hasActiveTasks,
+    totalDuration, hasActiveTasks,
     // Actions
-    selectFile,
-    fetchFileList,
-    fetchTaskList,
-    addFile,
-    addTasks,
-    removeFile,
-    updateTrimTimes,
+    selectFile, fetchFileList, fetchTaskList, addFile, addTasks, removeFile, updateTrimTimes,
+    initializeStore // 暴露初始化方法
   }
 })
