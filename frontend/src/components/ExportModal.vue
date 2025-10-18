@@ -165,11 +165,27 @@ const totalDuration = computed(() => {
     return previewFileInfo.value ? parseFloat(previewFileInfo.value.format.duration) : 0;
 });
 
-const previewTooltipText = computed(() => {
-    const count = formState.selectedFiles.length;
-    if (count <= 1) return "根据当前设置生成的 FFmpeg 命令预览。";
-    return `这是一个基于文件 "${previewFileName.value}" 生成的命令预览。相同的参数将应用于所有选中的 ${count} 个文件。`;
-});
+// 复制预览命令到剪贴板（无提示）
+const copyPreview = async () => {
+  const text = ffmpegCommandPreview.value || '';
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      message.success('已复制');
+    } else {
+      // 退回到 textarea 选择复制
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      message.success('已复制');
+    }
+  } catch {
+    // 忽略错误，不显示提示
+  }
+};
 
 const ffmpegCommandPreview = computed(() => {
     if (!previewFileInfo.value || !previewFileName.value) return '请选择文件以生成预览...';
@@ -255,14 +271,12 @@ const handleCancel = () => { emit('update:visible', false) };
   >
      <template #footer>
       <div class="modal-footer-grid">
-        <a-tooltip :title="previewTooltipText">
-          <div class="ffmpeg-command-preview">
-            <a-typography-text code>
-              {{ ffmpegCommandPreview }}
-            </a-typography-text>
-          </div>
-        </a-tooltip>
-        <div>
+        <div class="ffmpeg-command-preview" @click="copyPreview">
+          <a-typography-text code>
+            {{ ffmpegCommandPreview }}
+          </a-typography-text>
+        </div>
+        <div class="footer-actions">
           <a-button key="back" @click="handleCancel">取消</a-button>
           <a-button key="submit" type="primary" :loading="isProcessing" @click="handleOk">
             开始处理 ({{ formState.selectedFiles.length }})
@@ -287,7 +301,7 @@ const handleCancel = () => { emit('update:visible', false) };
       <div v-if="!previewFileInfo && formState.selectedFiles.length > 0" class="settings-placeholder">
         <a-spin tip="正在加载文件信息以生成设置选项..."></a-spin>
       </div>
-      
+
       <!-- 当有文件信息时显示设置 -->
       <fieldset :disabled="isPreviewLoading">
         <div v-if="previewFileInfo">
@@ -362,6 +376,13 @@ const handleCancel = () => { emit('update:visible', false) };
   background-color: #f0f2f5;
   padding: 4px 8px;
   border-radius: 4px;
+}
+.ffmpeg-command-preview {
+  cursor: pointer;
+}
+.footer-actions {
+  display: flex;
+  gap: 8px; /* 默认按钮间距 */
 }
 .ffmpeg-command-preview code {
   font-size: 12px;
