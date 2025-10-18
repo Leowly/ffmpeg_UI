@@ -1,7 +1,7 @@
 <!-- src/components/AppSidebar.vue -->
 <template>
   <div class="sidebar-container">
-    <div class="upload-section">
+      <div class="upload-section">
             <a-upload-dragger
               v-model:fileList="fileList"
               name="file"
@@ -226,12 +226,14 @@ const downloadTaskOutput = (taskId: number) => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  box-sizing: border-box;
 }
 
 .file-list-container, .task-list-container {
   flex-grow: 1;
   overflow-y: auto;
-  margin-top: 16px;
+  margin-top: 8px; /* 减少间隙 */
+  padding-right: 4px; /* 避免与滚动条贴边 */
 }
 
 .selected-item {
@@ -266,8 +268,20 @@ const downloadTaskOutput = (taskId: number) => {
   .sidebar-container :deep(.ant-upload-hint) {
     display: none;
   }
-  .sidebar-container :deep(.ant-upload-dragger) {
-    padding: 12px 0;
-  }
+}
+
+/* 减少分隔符（标题）上下间距，使“处理任务”“媒体文件”等更紧凑 */
+.sidebar-container :deep(.ant-divider) {
+  margin: 10px 0; /* 默认较大，缩小为 10px */
+}
+.sidebar-container :deep(.ant-divider-inner-text) {
+  padding: 2px; /* 减少内边距 */
+  line-height: 0; /* 紧凑行高 */
+  font-size: 15px;
+}
+.sidebar-container .task-title {
+  margin: 0;
+  padding: 0;
+  line-height: 1.2;
 }
 </style>

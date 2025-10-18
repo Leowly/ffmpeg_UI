@@ -48,10 +48,14 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
   <AuthForm v-if="!authStore.isLoggedIn" />
   <div v-else class="app-layout">
     <div class="sidebar">
-      <AppSidebar />
+      <div class="panel-card">
+        <AppSidebar />
+      </div>
     </div>
     <main class="main-content">
-      <SingleFileWorkspace />
+      <div class="panel-card">
+        <SingleFileWorkspace />
+      </div>
     </main>
 
     <!-- 左下角工具栏 -->
@@ -90,8 +94,9 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
 .sidebar {
   width: 350px;
   min-width: 300px;
-  background-color: #f0f2f5;
-  padding: 16px;
+  /* 保持与主背景一致，减少内边距以让内部卡片靠近边缘 */
+  background-color: transparent; /* 使用透明，显示上层 .app-layout 背景 */
+  padding: 4px;
   overflow-y: auto;
   flex-shrink: 0;
   display: flex;
@@ -100,13 +105,24 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
 
 .main-content {
   flex-grow: 1;
-  padding: 24px;
+  padding: 4px;
   overflow-y: auto;
+}
+
+.panel-card {
+  background-color: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 8px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
 .bottom-toolbar {
   position: fixed;
-  bottom: 20px;
+  bottom: 10px;
   left: 20px;
   z-index: 1000;
   display: flex;

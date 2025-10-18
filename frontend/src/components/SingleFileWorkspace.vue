@@ -234,7 +234,7 @@ onBeforeUnmount(() => {
 .workspace-container {
   height: 100%;
   overflow-y: auto; /* 允许内容超出时滚动 */
-  background-color: #fafafa;
+  background-color: transparent; /* 交由外层 .panel-card 控制背景 */
 }
 
 .placeholder,
@@ -250,7 +250,7 @@ onBeforeUnmount(() => {
 }
 
 .file-workspace {
-  padding: 16px 24px;
+  padding: 2px; /* 由 .panel-card 提供统一内边距 */
   box-sizing: border-box;
 }
 
@@ -276,6 +276,6 @@ onBeforeUnmount(() => {
 }
 
 .bottom-spacer {
-  height: 30px; /* 预留给左下角浮动按钮的空间 */
+  height: 40px; /* 预留给左下角浮动按钮的空间 */
 }
 </style>
