@@ -28,7 +28,7 @@ coverage
 *.sw?
 
 *.tsbuildinfo
-.venv/
 
-.env.production
-.env.development
+# Environment variables
+.env.*
+!.env.example
