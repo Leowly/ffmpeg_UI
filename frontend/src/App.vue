@@ -1,72 +1,76 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { onMounted, watch, ref, computed } from 'vue';
+import { onMounted, watch, ref, computed } from 'vue'
 import AppSidebar from './components/AppSidebar.vue'
-import SingleFileWorkspace from './components/SingleFileWorkspace.vue';
-import AuthForm from './components/AuthForm.vue';
-import UserInfo from './components/UserInfo.vue';
-import ExportModal from './components/ExportModal.vue';
-import TaskDetails from './components/TaskDetails.vue';
-import { useAuthStore } from './stores/authStore';
-import { useFileStore } from './stores/fileStore';
-import { ExportOutlined } from '@ant-design/icons-vue';
-import { message } from 'ant-design-vue';
+import SingleFileWorkspace from './components/SingleFileWorkspace.vue'
+import AuthForm from './components/AuthForm.vue'
+import UserInfo from './components/UserInfo.vue'
+import ExportModal from './components/ExportModal.vue'
+import TaskDetails from './components/TaskDetails.vue'
+import { useAuthStore } from './stores/authStore'
+import { useFileStore } from './stores/fileStore'
+import { ExportOutlined } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
 
-const authStore = useAuthStore();
-const fileStore = useFileStore();
+const authStore = useAuthStore()
+const fileStore = useFileStore()
 
-const isExportModalVisible = ref(false);
-const selectedTaskId = ref<number | null>(null); // 当前选中的任务ID
+const isExportModalVisible = ref(false)
+const selectedTaskId = ref<number | null>(null) // 当前选中的任务ID
 
 // 更新后的导出点击逻辑
 const handleExportClick = () => {
   if (fileStore.fileList.length === 0) {
-    message.warning('文件列表为空，请先上传一些文件再执行导出操作。');
-    return;
+    message.warning('文件列表为空，请先上传一些文件再执行导出操作。')
+    return
   }
-  isExportModalVisible.value = true;
-};
+  isExportModalVisible.value = true
+}
 
 // 获取选中的任务对象
 const selectedTask = computed(() => {
-  if (selectedTaskId.value === null) return null;
-  return fileStore.taskList.find(task => task.id === selectedTaskId.value) || null;
-});
+  if (selectedTaskId.value === null) return null
+  return fileStore.taskList.find((task) => task.id === selectedTaskId.value) || null
+})
 
 // 选择任务并显示详情
 const selectTask = (taskId: number) => {
-  selectedTaskId.value = taskId;
-};
+  selectedTaskId.value = taskId
+}
 
 // 创建一个标志，用于区分是初始加载还是状态变化
-let isInitialCheck = true;
+let isInitialCheck = true
 
 onMounted(async () => {
   if (authStore.isLoggedIn) {
     // 首先验证token是否有效
-    const isValid = await authStore.validateToken();
+    const isValid = await authStore.validateToken()
     if (isValid) {
-      fileStore.initializeStore();
+      fileStore.initializeStore()
     } else {
       // 如果token无效，确保用户状态被清除
-      authStore.logout();
+      authStore.logout()
     }
   }
-  isInitialCheck = false; // 标记初始检查已完成
-});
+  isInitialCheck = false // 标记初始检查已完成
+})
 
-watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
-  // 仅当状态从“未登录”变为“已登录”时，才执行此逻辑块
-  // 排除初始加载的情况
-  if (newVal && !oldVal && !isInitialCheck) {
-    await authStore.fetchCurrentUser();
-    // 确保获取用户信息成功后再获取其他数据
-    if (authStore.user) {
-      fileStore.initializeStore();
+watch(
+  () => authStore.isLoggedIn,
+  async (newVal, oldVal) => {
+    // 仅当状态从“未登录”变为“已登录”时，才执行此逻辑块
+    // 排除初始加载的情况
+    if (newVal && !oldVal && !isInitialCheck) {
+      await authStore.fetchCurrentUser()
+      // 确保获取用户信息成功后再获取其他数据
+      if (authStore.user) {
+        fileStore.initializeStore()
+      }
     }
-  }
-  isInitialCheck = false; // 在任何状态变化后都设置为false
-}, { immediate: true });
+    isInitialCheck = false // 在任何状态变化后都设置为false
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -87,12 +91,7 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
     <!-- 左下角工具栏 -->
     <div class="bottom-toolbar">
       <UserInfo />
-      <a-button
-        type="primary"
-        shape="round"
-        size="large"
-        @click="handleExportClick"
-      >
+      <a-button type="primary" shape="round" size="large" @click="handleExportClick">
         <template #icon><ExportOutlined /></template>
         导出文件
       </a-button>
@@ -143,7 +142,7 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .bottom-toolbar {
@@ -174,4 +173,3 @@ watch(() => authStore.isLoggedIn, async (newVal, oldVal) => {
   }
 }
 </style>
-

@@ -1,6 +1,10 @@
 <template>
   <div class="auth-container">
-    <a-card :title="currentMode === 'login' ? '登录' : '注册'" :bordered="false" style="width: 400px">
+    <a-card
+      :title="currentMode === 'login' ? '登录' : '注册'"
+      :bordered="false"
+      style="width: 400px"
+    >
       <a-form
         v-if="currentMode === 'login'"
         :model="loginFormState"
@@ -14,7 +18,7 @@
             { required: true, message: '请输入用户名!' },
             { min: 1, message: '用户名至少1个字符' },
             { max: 50, message: '用户名最多50个字符' },
-            { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线' }
+            { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线' },
           ]"
         >
           <a-input v-model:value="loginFormState.username" />
@@ -26,16 +30,14 @@
           :rules="[
             { required: true, message: '请输入密码!' },
             { min: 6, message: '密码至少6个字符' },
-            { max: 72, message: '密码最多72个字符' }
+            { max: 72, message: '密码最多72个字符' },
           ]"
         >
           <a-input-password v-model:value="loginFormState.password" />
         </a-form-item>
 
         <a-form-item>
-          <a-button type="primary" html-type="submit" :loading="loading" block>
-            登录
-          </a-button>
+          <a-button type="primary" html-type="submit" :loading="loading" block> 登录 </a-button>
         </a-form-item>
         <a-form-item>
           <a-button type="link" @click="currentMode = 'register'" block>
@@ -44,12 +46,7 @@
         </a-form-item>
       </a-form>
 
-      <a-form
-        v-else
-        :model="registerFormState"
-        @finish="handleRegister"
-        layout="vertical"
-      >
+      <a-form v-else :model="registerFormState" @finish="handleRegister" layout="vertical">
         <a-form-item
           label="用户名"
           name="username"
@@ -57,7 +54,7 @@
             { required: true, message: '请输入用户名!' },
             { min: 1, message: '用户名至少1个字符' },
             { max: 50, message: '用户名最多50个字符' },
-            { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线' }
+            { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线' },
           ]"
         >
           <a-input v-model:value="registerFormState.username" />
@@ -70,7 +67,10 @@
             { required: true, message: '请输入密码!' },
             { min: 6, message: '密码至少6个字符' },
             { max: 72, message: '密码最多72个字符' },
-            { pattern: /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d]{6,72}$/, message: '密码必须包含字母和数字' }
+            {
+              pattern: /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d]{6,72}$/,
+              message: '密码必须包含字母和数字',
+            },
           ]"
         >
           <a-input-password v-model:value="registerFormState.password" />
@@ -88,14 +88,10 @@
         </a-form-item>
 
         <a-form-item>
-          <a-button type="primary" html-type="submit" :loading="loading" block>
-            注册
-          </a-button>
+          <a-button type="primary" html-type="submit" :loading="loading" block> 注册 </a-button>
         </a-form-item>
         <a-form-item>
-          <a-button type="link" @click="currentMode = 'login'" block>
-            已有账号？立即登录
-          </a-button>
+          <a-button type="link" @click="currentMode = 'login'" block> 已有账号？立即登录 </a-button>
         </a-form-item>
       </a-form>
     </a-card>
@@ -103,61 +99,61 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
-import { useAuthStore } from '@/stores/authStore';
-import { message } from 'ant-design-vue';
+import { reactive, ref } from 'vue'
+import { useAuthStore } from '@/stores/authStore'
+import { message } from 'ant-design-vue'
 
-const authStore = useAuthStore();
-const loading = ref(false);
-const currentMode = ref<'login' | 'register'>('login');
+const authStore = useAuthStore()
+const loading = ref(false)
+const currentMode = ref<'login' | 'register'>('login')
 
 const loginFormState = reactive({
   username: '',
   password: '',
-});
+})
 
 const registerFormState = reactive({
   username: '',
   password: '',
   confirmPassword: '',
-});
+})
 
 const handleLogin = async () => {
-  loading.value = true;
-  const success = await authStore.login(loginFormState.username, loginFormState.password);
+  loading.value = true
+  const success = await authStore.login(loginFormState.username, loginFormState.password)
   if (success) {
     // 登录成功，AuthStore 会自动更新 isLoggedIn 状态
     // App.vue 会根据 isLoggedIn 状态切换视图
   }
-  loading.value = false;
-};
+  loading.value = false
+}
 
 const handleRegister = async () => {
   if (registerFormState.password !== registerFormState.confirmPassword) {
-    message.error('两次输入的密码不一致！');
-    return;
+    message.error('两次输入的密码不一致！')
+    return
   }
-  loading.value = true;
-  const success = await authStore.register(registerFormState.username, registerFormState.password);
+  loading.value = true
+  const success = await authStore.register(registerFormState.username, registerFormState.password)
   if (success) {
     // 注册成功，AuthStore.register 已经显示了成功消息
-    currentMode.value = 'login'; // 注册成功后切换到登录模式
+    currentMode.value = 'login' // 注册成功后切换到登录模式
     // 清空注册表单
-    registerFormState.username = '';
-    registerFormState.password = '';
-    registerFormState.confirmPassword = '';
+    registerFormState.username = ''
+    registerFormState.password = ''
+    registerFormState.confirmPassword = ''
   }
-  loading.value = false;
-};
+  loading.value = false
+}
 
-import type { RuleObject } from 'ant-design-vue/es/form/interface';
+import type { RuleObject } from 'ant-design-vue/es/form/interface'
 
 const validateConfirmPassword = (_rule: RuleObject, value: string) => {
   if (currentMode.value === 'register' && value !== registerFormState.password) {
-    return Promise.reject('两次输入的密码不一致！');
+    return Promise.reject('两次输入的密码不一致！')
   }
-  return Promise.resolve();
-};
+  return Promise.resolve()
+}
 </script>
 
 <style scoped>

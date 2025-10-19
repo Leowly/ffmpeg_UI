@@ -50,13 +50,21 @@
                 <a-list-item-meta :description="getTaskDescription(task)">
                   <template #title>
                     <a-tooltip :title="getTaskDescription(task)" placement="topLeft">
-                      <span class="task-title" @click="$emit('task-selected', task.id)">任务 #{{ task.id }}</span>
+                      <span class="task-title" @click="$emit('task-selected', task.id)"
+                        >任务 #{{ task.id }}</span
+                      >
                     </a-tooltip>
                   </template>
                   <template #avatar>
                     <a-spin v-if="['pending', 'processing'].includes(task.status)" />
-                    <CheckCircleOutlined v-else-if="task.status === 'completed'" style="color: #52c41a; font-size: 24px;" />
-                    <CloseCircleOutlined v-else-if="task.status === 'failed'" style="color: #ff4d4f; font-size: 24px;" />
+                    <CheckCircleOutlined
+                      v-else-if="task.status === 'completed'"
+                      style="color: #52c41a; font-size: 24px"
+                    />
+                    <CloseCircleOutlined
+                      v-else-if="task.status === 'failed'"
+                      style="color: #ff4d4f; font-size: 24px"
+                    />
                   </template>
                 </a-list-item-meta>
               </a-list-item>
@@ -98,7 +106,9 @@
             </template>
             <template #avatar>
               <video-camera-outlined v-if="item.name.match(/\.(mp4|mov|mkv|avi|webm)$/i)" />
-              <customer-service-outlined v-else-if="item.name.match(/\.(mp3|wav|flac|aac|ogg)$/i)" />
+              <customer-service-outlined
+                v-else-if="item.name.match(/\.(mp3|wav|flac|aac|ogg)$/i)"
+              />
               <file-outlined v-else />
             </template>
           </a-list-item-meta>
@@ -110,11 +120,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
-import { useFileStore, type Task } from '@/stores/fileStore';
-import { useAuthStore } from '@/stores/authStore';
-import { API_ENDPOINTS } from '@/api';
-import { message, type UploadChangeParam, type UploadFile } from 'ant-design-vue';
+import { ref, computed, watch } from 'vue'
+import { useFileStore, type Task } from '@/stores/fileStore'
+import { useAuthStore } from '@/stores/authStore'
+import { API_ENDPOINTS } from '@/api'
+import { message, type UploadChangeParam, type UploadFile } from 'ant-design-vue'
 import {
   InboxOutlined,
   VideoCameraOutlined,
@@ -123,89 +133,88 @@ import {
   DeleteOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-} from '@ant-design/icons-vue';
+} from '@ant-design/icons-vue'
 
-const emit = defineEmits(['task-selected', 'file-selected']);
+const emit = defineEmits(['task-selected', 'file-selected'])
 
-const fileStore = useFileStore();
-const authStore = useAuthStore();
+const fileStore = useFileStore()
+const authStore = useAuthStore()
 
-const activeTaskPanelKey = ref<string[]>([]); // 控制折叠面板的展开
+const activeTaskPanelKey = ref<string[]>([]) // 控制折叠面板的展开
 
 // 监听来自 store 的信号，以展开面板
-watch(() => fileStore.triggerTaskPanel, (shouldExpand) => {
-  if (shouldExpand) {
-    activeTaskPanelKey.value = ['1'];
-  }
-});
-
-
+watch(
+  () => fileStore.triggerTaskPanel,
+  (shouldExpand) => {
+    if (shouldExpand) {
+      activeTaskPanelKey.value = ['1']
+    }
+  },
+)
 
 // 这个 ref 仅用于 antd-upload 组件的 v-model，不作为核心状态
-const uploadComponentFileList = ref<UploadFile[]>([]);
+const uploadComponentFileList = ref<UploadFile[]>([])
 
-const uploadUrl = computed(() => API_ENDPOINTS.UPLOAD_FILE);
+const uploadUrl = computed(() => API_ENDPOINTS.UPLOAD_FILE)
 const uploadHeaders = computed(() => ({
   Authorization: `Bearer ${authStore.token}`,
-}));
-
+}))
 
 /**
  * 处理文件上传状态的变化
  */
 const handleUploadChange = (info: UploadChangeParam) => {
   if (info.file.status === 'done') {
-    message.success(`${info.file.name} 文件上传成功`);
+    message.success(`${info.file.name} 文件上传成功`)
     // 调用 store 的 action 来添加文件，保持状态统一
-    fileStore.addFile(info.file.response);
+    fileStore.addFile(info.file.response)
   } else if (info.file.status === 'error') {
-    const errorMsg = info.file.response?.detail || '网络错误';
-    message.error(`${info.file.name} 文件上传失败: ${errorMsg}`);
+    const errorMsg = info.file.response?.detail || '网络错误'
+    message.error(`${info.file.name} 文件上传失败: ${errorMsg}`)
   }
-};
+}
 
 /**
  * 处理文件拖拽事件 (可在此处添加逻辑)
  */
 const handleDrop = (e: DragEvent) => {
-  console.log('Files dropped:', e);
-};
+  console.log('Files dropped:', e)
+}
 
 /**
  * 选中文件时，调用 store 的 action
  */
 const handleFileSelect = (fileId: string) => {
-  fileStore.selectFile(fileId);
-  emit('file-selected');
-};
+  fileStore.selectFile(fileId)
+  emit('file-selected')
+}
 
 /**
  * 删除文件时，调用 store 的 action
  */
 const handleDeleteFile = (fileId: string) => {
-  fileStore.removeFile(fileId);
-};
+  fileStore.removeFile(fileId)
+}
 
 /**
  * 从任务对象中提取并格式化描述信息
  */
 const getTaskDescription = (task: Task): string => {
-  const baseName = task.source_filename || (task.output_path ? task.output_path.split(/[\\/]/).pop() : null);
+  const baseName =
+    task.source_filename || (task.output_path ? task.output_path.split(/[\\/]/).pop() : null)
 
   if (task.status === 'completed' && task.output_path) {
-    const outputFilename = task.output_path.split(/[\\/]/).pop();
-    return `-> ${outputFilename || '未知输出'}`;
+    const outputFilename = task.output_path.split(/[\\/]/).pop()
+    return `-> ${outputFilename || '未知输出'}`
   }
 
   if (baseName) {
     // 对于正在处理或失败的任务，显示源文件名
-    return `源: ${baseName}`;
+    return `源: ${baseName}`
   }
 
-  return '正在准备任务...';
-};
-
-
+  return '正在准备任务...'
+}
 </script>
 
 <style scoped>
@@ -244,12 +253,14 @@ const getTaskDescription = (task: Task): string => {
   background: #aaaaaa;
 }
 
-.file-item, .task-item {
+.file-item,
+.task-item {
   cursor: pointer;
   padding: 8px 12px;
 }
 
-.file-item:hover, .task-item:hover {
+.file-item:hover,
+.task-item:hover {
   background-color: #f5f5f5;
 }
 
@@ -258,7 +269,8 @@ const getTaskDescription = (task: Task): string => {
   border-right: 3px solid #1890ff;
 }
 
-.task-title, .file-name {
+.task-title,
+.file-name {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -311,7 +323,6 @@ const getTaskDescription = (task: Task): string => {
 .sidebar-container :deep(.ant-collapse-arrow) {
   display: none; /* 隐藏默认的箭头 */
 }
-
 
 @media (max-width: 768px) {
   .sidebar-container :deep(.ant-upload-drag-icon),

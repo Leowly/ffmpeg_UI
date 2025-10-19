@@ -41,7 +41,11 @@
             </a-tooltip>
           </div>
         </a-descriptions-item>
-        <a-descriptions-item v-if="task.details && task.details.length > 0" label="详细信息" :span="2">
+        <a-descriptions-item
+          v-if="task.details && task.details.length > 0"
+          label="详细信息"
+          :span="2"
+        >
           <div class="details-content">
             <pre class="details-text">{{ task.details }}</pre>
           </div>
@@ -50,26 +54,18 @@
     </div>
 
     <div class="task-actions" v-if="task.status === 'completed' && task.output_path">
-      <a-button
-        type="primary"
-        @click="goToFileAndDownload"
-      >
+      <a-button type="primary" @click="goToFileAndDownload">
         <DownloadOutlined />
         定位到文件并下载
       </a-button>
-      <a-button
-        @click="goToFile"
-      >
+      <a-button @click="goToFile">
         <FileOutlined />
         定位到文件
       </a-button>
     </div>
 
     <div class="task-actions" v-else-if="task.status === 'failed' && task.details">
-      <a-button
-        type="primary"
-        @click="copyErrorDetails"
-      >
+      <a-button type="primary" @click="copyErrorDetails">
         <CopyOutlined />
         复制错误信息
       </a-button>
@@ -78,143 +74,134 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useFileStore, type Task } from '@/stores/fileStore';
-import { message } from 'ant-design-vue';
-import {
-  CopyOutlined,
-  DownloadOutlined,
-  FileOutlined,
-  CloseOutlined
-} from '@ant-design/icons-vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useFileStore, type Task } from '@/stores/fileStore'
+import { message } from 'ant-design-vue'
+import { CopyOutlined, DownloadOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons-vue'
 
 // 接收任务作为 prop
 const props = defineProps<{
-  task: Task;
-}>();
+  task: Task
+}>()
 
 // 定义 emits
-const emit = defineEmits(['close']);
+const emit = defineEmits(['close'])
 
 // 响应式列数，根据屏幕宽度调整
-const descriptionColumns = ref(2);
+const descriptionColumns = ref(2)
 
 // 创建 ResizeObserver 实例
-let observer: ResizeObserver | null = null;
-const workspaceRef = ref<HTMLElement | null>(null);
+let observer: ResizeObserver | null = null
+const workspaceRef = ref<HTMLElement | null>(null)
 
 // 设置响应式列数
 const setupResizeObserver = () => {
   if (workspaceRef.value) {
     observer = new ResizeObserver((entries) => {
-      const contentWidth = entries[0].contentRect.width;
-      descriptionColumns.value = contentWidth < 620 ? 1 : 2;
-    });
-    observer.observe(workspaceRef.value);
+      const contentWidth = entries[0].contentRect.width
+      descriptionColumns.value = contentWidth < 620 ? 1 : 2
+    })
+    observer.observe(workspaceRef.value)
   }
-};
+}
 
 onMounted(() => {
   nextTick(() => {
-    workspaceRef.value = document.querySelector('.task-details') as HTMLElement;
-    setupResizeObserver();
-  });
-});
+    workspaceRef.value = document.querySelector('.task-details') as HTMLElement
+    setupResizeObserver()
+  })
+})
 
 onBeforeUnmount(() => {
   if (observer) {
-    observer.disconnect();
+    observer.disconnect()
   }
-});
-
-
+})
 
 // 文件store实例
-const fileStore = useFileStore();
+const fileStore = useFileStore()
 
 // 根据状态获取颜色
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'pending':
-      return 'orange';
+      return 'orange'
     case 'processing':
-      return 'blue';
+      return 'blue'
     case 'completed':
-      return 'green';
+      return 'green'
     case 'failed':
-      return 'red';
+      return 'red'
     default:
-      return 'default';
+      return 'default'
   }
-};
+}
 
 // 根据状态获取文本
 const getStatusText = (status: string) => {
   switch (status) {
     case 'pending':
-      return '等待中';
+      return '等待中'
     case 'processing':
-      return '处理中';
+      return '处理中'
     case 'completed':
-      return '已完成';
+      return '已完成'
     case 'failed':
-      return '已失败';
+      return '已失败'
     default:
-      return status;
+      return status
   }
-};
+}
 
 // 检查是否在处理中
 const isProcessing = (status: string) => {
-  return ['pending', 'processing'].includes(status);
-};
+  return ['pending', 'processing'].includes(status)
+}
 
 // 获取进度
 const getProgress = (task: Task) => {
-  if (task.status === 'completed') return 100;
-  if (task.status === 'failed') return 0;
-  return task.progress || 0;
-};
+  if (task.status === 'completed') return 100
+  if (task.status === 'failed') return 0
+  return task.progress || 0
+}
 
 // 格式化日期
-
-
 
 // 复制命令到剪贴板
 const copyCommand = async () => {
   try {
-    await navigator.clipboard.writeText(props.task.ffmpeg_command);
-    message.success('命令已复制到剪贴板');
+    await navigator.clipboard.writeText(props.task.ffmpeg_command)
+    message.success('命令已复制到剪贴板')
   } catch {
-    message.error('复制命令失败');
+    message.error('复制命令失败')
   }
-};
+}
 
 // 复制错误详情到剪贴板
 const copyErrorDetails = async () => {
   try {
-    await navigator.clipboard.writeText(props.task.details || '');
-    message.success('错误信息已复制到剪贴板');
+    await navigator.clipboard.writeText(props.task.details || '')
+    message.success('错误信息已复制到剪贴板')
   } catch {
-    message.error('复制错误信息失败');
+    message.error('复制错误信息失败')
   }
-};
+}
 
 // 定位到处理后的文件
 const goToFile = () => {
-  fileStore.selectFileByTask(props.task);
-};
+  fileStore.selectFileByTask(props.task)
+}
 
 // 定位到文件并下载
 const goToFileAndDownload = () => {
-  goToFile();
+  goToFile()
   setTimeout(() => {
     // 稍等一下确保文件已选中，然后触发下载
     if (fileStore.selectedFileId) {
-      window.open(`/api/download-file/${fileStore.selectedFileId}`, '_blank');
+      window.open(`/api/download-file/${fileStore.selectedFileId}`, '_blank')
     }
-  }, 300);
-};
+  }, 300)
+}
 </script>
 
 <style scoped>

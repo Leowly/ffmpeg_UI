@@ -7,26 +7,22 @@
 
     <template #overlay>
       <a-menu>
-        <div class="user-id-display">
-          id: {{ authStore.user?.id }}
-        </div>
-        <a-menu-item key="logout" @click="handleLogout">
-          退出登录
-        </a-menu-item>
+        <div class="user-id-display">id: {{ authStore.user?.id }}</div>
+        <a-menu-item key="logout" @click="handleLogout"> 退出登录 </a-menu-item>
       </a-menu>
     </template>
   </a-dropdown>
 </template>
 
 <script setup lang="ts">
-import { useAuthStore } from '@/stores/authStore';
-import { UserOutlined } from '@ant-design/icons-vue';
+import { useAuthStore } from '@/stores/authStore'
+import { UserOutlined } from '@ant-design/icons-vue'
 
-const authStore = useAuthStore();
+const authStore = useAuthStore()
 
 const handleLogout = () => {
-  authStore.logout();
-};
+  authStore.logout()
+}
 </script>
 
 <style scoped>

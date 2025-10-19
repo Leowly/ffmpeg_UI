@@ -1,9 +1,10 @@
 // src/api/index.ts
 
-const BASE_URL = 'http://127.0.0.1:8000';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 export const API_ENDPOINTS = {
   TOKEN: `${BASE_URL}/token`,
+  CREATE_USER: `${BASE_URL}/users/`,
   CURRENT_USER: `${BASE_URL}/users/me`,
   FILE_LIST: `${BASE_URL}/api/files`,
   UPLOAD_FILE: `${BASE_URL}/api/upload`,
@@ -12,5 +13,5 @@ export const API_ENDPOINTS = {
   PROCESS_FILE: `${BASE_URL}/api/process`,
   TASK_LIST: `${BASE_URL}/api/tasks`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
-  DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}` // 示例，可能需要实现
-};
+  DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`, // 示例，可能需要实现
+}

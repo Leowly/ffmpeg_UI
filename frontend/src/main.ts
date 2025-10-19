@@ -13,9 +13,9 @@ import axios from 'axios'
 axios.defaults.withCredentials = true
 
 // 在应用启动时检查 localStorage 中是否存在 token，并设置到 axios 默认头中
-const token = localStorage.getItem('access_token');
+const token = localStorage.getItem('access_token')
 if (token) {
-  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
 }
 
 const app = createApp(App)
