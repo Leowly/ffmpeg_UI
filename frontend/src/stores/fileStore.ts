@@ -55,6 +55,7 @@ export interface Task {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   details: string | null;
   owner_id: number;
+  progress: number;
 }
 
 // --- Store 定义 ---
@@ -313,6 +314,36 @@ async function removeFile(fileId: string) {
   }
 
   /**
+   * 根据任务信息定位到对应的处理后文件
+   */
+  function selectFileByTask(task: Task) {
+    if (!task.output_path) {
+      console.warn('任务没有输出文件路径');
+      return;
+    }
+
+    // 从输出路径获取文件名
+    const outputFilename = task.output_path.split(/[\\/]/).pop();
+    if (!outputFilename) {
+      console.error('无法从输出路径获取文件名');
+      return;
+    }
+
+    // 查找对应文件的ID
+    const targetFile = fileList.value.find(file => {
+      return file.name.includes('_processed') && file.name.includes(outputFilename.split('.')[0]);
+    });
+
+    if (targetFile) {
+      // 选中文件并跳转到工作区
+      selectFile(targetFile.id);
+      message.success(`已定位到文件: ${targetFile.name}`);
+    } else {
+      message.warning('未找到对应的处理后文件，请确保文件列表已刷新');
+    }
+  }
+
+  /**
    * Store初始化/应用启动时的逻辑
    */
   async function initializeStore() {
@@ -336,7 +367,7 @@ async function removeFile(fileId: string) {
     // Getters
     totalDuration, hasActiveTasks,
     // Actions
-    selectFile, fetchFileList, fetchTaskList, addFile, addTasks, removeFile, removeTask, updateTrimTimes,
+    selectFile, fetchFileList, fetchTaskList, addFile, addTasks, removeFile, removeTask, updateTrimTimes, selectFileByTask,
     initializeStore // 暴露初始化方法
   }
 })

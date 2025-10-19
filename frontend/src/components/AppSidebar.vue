@@ -46,19 +46,11 @@
                   >
                     <a @click.stop><delete-outlined /></a>
                   </a-popconfirm>
-
-                  <!-- 仅当任务完成且有有效输出路径时显示下载按钮 -->
-                  <a-tooltip v-if="task.status === 'completed' && task.output_path" title="下载处理后的文件">
-                    <a @click.prevent.stop="downloadTaskOutput(task)"><DownloadOutlined /></a>
-                  </a-tooltip>
-                  <a-tooltip v-if="task.status === 'failed'" :title="task.details || '未知错误'">
-                    <ExclamationCircleOutlined style="color: red" />
-                  </a-tooltip>
                 </template>
                 <a-list-item-meta :description="getTaskDescription(task)">
                   <template #title>
                     <a-tooltip :title="getTaskDescription(task)" placement="topLeft">
-                      <span class="task-title">任务 #{{ task.id }}</span>
+                      <span class="task-title" @click="$emit('task-selected', task.id)">任务 #{{ task.id }}</span>
                     </a-tooltip>
                   </template>
                   <template #avatar>
@@ -129,11 +121,11 @@ import {
   CustomerServiceOutlined,
   FileOutlined,
   DeleteOutlined,
-  DownloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ExclamationCircleOutlined,
 } from '@ant-design/icons-vue';
+
+const emit = defineEmits(['task-selected', 'file-selected']);
 
 const fileStore = useFileStore();
 const authStore = useAuthStore();
@@ -146,6 +138,8 @@ watch(() => fileStore.triggerTaskPanel, (shouldExpand) => {
     activeTaskPanelKey.value = ['1'];
   }
 });
+
+
 
 // 这个 ref 仅用于 antd-upload 组件的 v-model，不作为核心状态
 const uploadComponentFileList = ref<UploadFile[]>([]);
@@ -182,6 +176,7 @@ const handleDrop = (e: DragEvent) => {
  */
 const handleFileSelect = (fileId: string) => {
   fileStore.selectFile(fileId);
+  emit('file-selected');
 };
 
 /**
@@ -210,55 +205,7 @@ const getTaskDescription = (task: Task): string => {
   return '正在准备任务...';
 };
 
-/**
- * 下载已完成任务的输出文件
- * @param task - 已完成的任务对象
- */
-const downloadTaskOutput = async (task: Task) => {
-  if (!task.output_path) {
-    message.error("任务没有有效的输出文件路径。");
-    return;
-  }
-  // 注意：因为新文件已经通过轮询加入文件列表，理论上可以直接从文件列表下载。
-  // 但为了任务列表的独立功能性，这里保留通过任务ID下载的逻辑。
-  // 后端需要一个 download-task/{taskId} 的接口
-  const url = API_ENDPOINTS.DOWNLOAD_TASK(task.id);
-  const token = authStore.token;
 
-  try {
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || `服务器错误: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const contentDisposition = response.headers.get('content-disposition');
-    let filename = task.output_path.split(/[\\/]/).pop() || 'downloaded_file'; // 默认使用任务的输出文件名
-
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?(.+?)"?/i);
-      if (filenameMatch && filenameMatch[1]) {
-        filename = filenameMatch[1];
-      }
-    }
-
-    // 创建并触发下载链接
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-
-  } catch (err) {
-    message.error(`下载失败: ${err instanceof Error ? err.message : String(err)}`);
-  }
-};
 </script>
 
 <style scoped>

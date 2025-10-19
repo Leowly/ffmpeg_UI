@@ -8,9 +8,21 @@ import logging
 import shlex
 import sys
 from typing import cast, List, Tuple
-from queue import Queue, Empty
-from threading import Thread
 
+def detect_video_codec(input_path: str) -> str:
+    """返回输入视频的编码名称，例如 'av1', 'h264', 'hevc'"""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "default=nw=1:nk=1",
+            input_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.stdout.strip()
+    except Exception:
+        return ""
 # 策略设置现在由 run.py 处理，但保留在这里也无害
 if sys.platform == "win32":
     print(">>> Gemini: Running on Windows. Attempting to set Proactor event loop policy...")
@@ -445,6 +457,120 @@ async def download_file(
     headers = {"Content-Disposition": f'attachment; filename="{db_file.filename}"'}
     return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
 
+def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.ProcessPayload) -> list:
+    """
+    智能构建 FFmpeg 命令。
+    此版本合并了所有逻辑：
+    1. 智能纠正与目标容器不兼容的编解码器。
+    2. 自动为纯音频格式移除视频流 (-vn)。
+    3. 优先尝试为 AV1 视频指定 NVIDIA 硬件解码器 (av1_cuvid)。
+    4. 保留 -analyzeduration 和 -probesize 作为后备，以处理一般性文件解析问题。
+    """
+    # --- 1. 初始化和参数决策 (来自旧 smart_detect_video_params 的逻辑) ---
+    
+    # 从前端请求中获取初始参数
+    video_codec = params.videoCodec
+    audio_codec = params.audioCodec
+    container = params.container
+
+    # 判断是否为纯音频输出格式
+    is_audio_only_output = container in ['mp3', 'flac', 'wav', 'aac', 'ogg']
+
+    # --- 智能纠正视频编解码器 ---
+    if not is_audio_only_output and video_codec != 'copy':
+        # 为常用视频容器推荐并强制使用兼容的编码器
+        if container == 'mp4' and video_codec not in ['libx264', 'libx265']:
+            video_codec = 'libx264'  # MP4 最广泛兼容的是 H.264
+        elif container == 'mkv' and video_codec not in ['libx264', 'libx265', 'libaom-av1', 'vp9']:
+            video_codec = 'libx264'  # MKV 很灵活，但 H.264 是安全的选择
+        elif container == 'mov' and video_codec not in ['libx264', 'libx265']:
+            video_codec = 'libx264'  # MOV 常用 H.264
+
+    # --- 智能纠正音频编解码器 ---
+    if audio_codec != 'copy':
+        # 为常用容器推荐并强制使用兼容的编码器
+        if container in ['mp4', 'mov'] and audio_codec not in ['aac', 'mp3']:
+            audio_codec = 'aac'  # MP4/MOV 标准音频是 AAC
+        elif container == 'mkv' and audio_codec not in ['aac', 'mp3', 'opus', 'flac']:
+            audio_codec = 'aac'  # 为 MKV 默认 AAC
+        # 如果输出容器本身就是一种音频编码，则强制使用对应的编码器
+        elif container == 'mp3':
+            audio_codec = 'libmp3lame' # 使用高质量 LAME MP3 编码器
+        elif container == 'flac':
+            audio_codec = 'flac'
+        elif container == 'aac':
+            audio_codec = 'aac'
+        elif container == 'wav':
+            audio_codec = 'pcm_s16le' # WAV 通常使用 PCM
+
+    # --- 2. 开始构建命令列表 ---
+    command = ["ffmpeg", "-y"]
+
+    # --- 3. 添加输入解码选项 (硬件加速检测等) ---
+
+    # 检测输入视频的编码
+    input_codec = detect_video_codec(input_path)
+
+    # 如果是 AV1 编码，优先尝试使用 NVIDIA 硬件解码器
+    if input_codec == 'av1':
+        logging.getLogger("ffmpeg_runner").info("Detected AV1 input, attempting to use hardware decoder 'av1_cuvid'.")
+        command.extend(["-c:v", "av1_cuvid"])
+
+    # 总是添加分析参数，以提高对不标准文件的解析成功率
+    command.extend(["-analyzeduration", "20M", "-probesize", "20M"])
+
+    # --- 4. 添加输入、裁剪和流映射 ---
+
+    # 裁剪开始时间
+    if params.startTime > 0:
+        command.extend(["-ss", str(params.startTime)])
+    
+    # 输入文件
+    command.extend(["-i", input_path])
+
+    # 裁剪结束时间
+    if params.endTime < params.totalDuration:
+        command.extend(["-to", str(params.endTime)])
+
+    # 如果是纯音频输出，则明确告诉 FFmpeg 丢弃视频流
+    if is_audio_only_output:
+        command.append("-vn")  # -vn (video null) 表示无视频
+        command.extend(["-map", "0:a?"]) # 只映射音频流
+    else:
+        # 否则，映射所有可能的视频和音频流
+        command.extend(["-map", "0:v?", "-map", "0:a?"])
+
+    # 修复时间戳
+    command.extend(["-fflags", "+genpts", "-avoid_negative_ts", "make_zero"])
+
+    # --- 5. 添加编码选项 ---
+
+    # 视频编码 (仅在不是纯音频输出时添加)
+    if not is_audio_only_output:
+        if video_codec != "copy":
+            command.extend(["-c:v", video_codec])
+            if params.videoBitrate:
+                command.extend(["-b:v", f"{params.videoBitrate}k"])
+            if params.resolution:
+                command.extend(["-s", f"{params.resolution.width}x{params.resolution.height}"])
+        else:
+            command.extend(["-c:v", "copy"])
+
+    # 音频编码
+    if audio_codec != "copy":
+        command.extend(["-c:a", audio_codec])
+        if params.audioBitrate:
+            command.extend(["-b:a", f"{params.audioBitrate}k"])
+    else:
+        command.extend(["-c:a", "copy"])
+
+    # --- 6. 添加输出路径 ---
+    command.append(output_path)
+
+    return command
+
+
+
 @app.post("/api/process", response_model=List[schemas.Task], tags=["Files"])
 async def process_files(
     payload: schemas.ProcessPayload,
@@ -474,7 +600,7 @@ async def process_files(
             logging.getLogger("ffmpeg_runner").warning(f"file id {file_id} not owned by user {current_user.id}, skipping")
             continue
 
-        # --- 动态构建 FFmpeg 命令 (新逻辑) ---
+        # --- 智能构建 FFmpeg 命令 ---
         input_path = os.path.normpath(db_file.filepath)
         
         # 1. 获取不带扩展名的原始文件名和扩展名
@@ -491,45 +617,8 @@ async def process_files(
         temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
         temp_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), temp_output_filename))
 
-        # 5. 构建 FFmpeg 命令列表
-        #    使用 -y 参数可以在开发或重试时自动覆盖同名的临时文件
-        command = ["ffmpeg", "-y"]
-
-        # 时间裁剪 (Input seeking for speed and accuracy)
-        if payload.startTime > 0:
-            command.extend(["-ss", str(payload.startTime)])
-
-        # 探测选项
-        command.extend(["-probesize", "5M", "-analyzeduration", "10M"])
-
-        # 输入文件
-        command.extend(["-i", input_path])
-
-        # 设置时长
-        if payload.endTime < payload.totalDuration:
-            duration = payload.endTime - payload.startTime
-            if duration > 0:
-                command.extend(["-t", str(duration)])
-
-        # 可选的流映射
-        command.extend(["-map", "0:v?", "-map", "0:a?"])
-
-        # 视频编码
-        command.extend(["-c:v", payload.videoCodec])
-        if payload.videoCodec != 'copy':
-            command.extend(["-pix_fmt", "yuv420p"])
-            if payload.videoBitrate:
-                command.extend(["-b:v", f"{payload.videoBitrate}k"])
-            if payload.resolution:
-                command.extend(["-s", f"{payload.resolution.width}x{payload.resolution.height}"])
-        
-        # 音频编码
-        command.extend(["-c:a", payload.audioCodec])
-        if payload.audioCodec != 'copy' and payload.audioBitrate:
-            command.extend(["-b:a", f"{payload.audioBitrate}k"])
-
-        # 6. 输出路径（关键：指向临时文件）
-        command.append(temp_output_path)
+        # 5. 使用智能函数构建 FFmpeg 命令
+        command = construct_ffmpeg_command(input_path, temp_output_path, payload)
 
         # 构造一个用于显示/存入 DB 的可读命令字符串
         if sys.platform == "win32":

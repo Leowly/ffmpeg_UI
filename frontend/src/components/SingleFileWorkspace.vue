@@ -24,7 +24,7 @@
 
       <a-descriptions bordered :column="descriptionColumns">
         <!-- 1. 通用信息 -->
-        <a-descriptions-item label="容器格式" :span="2">{{ fileStore.fileInfo.format.format_long_name }}</a-descriptions-item>
+        <a-descriptions-item label="容器格式" :span="descriptionColumns >= 2 ? 2 : 1">{{ fileStore.fileInfo.format.format_long_name }}</a-descriptions-item>
         <a-descriptions-item label="时长">{{ parseFloat(fileStore.fileInfo.format.duration).toFixed(2) }} 秒</a-descriptions-item>
         <a-descriptions-item label="文件大小">{{ (parseInt(fileStore.fileInfo.format.size) / 1024 / 1024).toFixed(2) }} MB</a-descriptions-item>
         <a-descriptions-item label="总比特率">{{ (parseInt(fileStore.fileInfo.format.bit_rate) / 1000).toFixed(0) }} kb/s</a-descriptions-item>

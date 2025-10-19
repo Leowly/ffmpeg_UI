@@ -89,10 +89,23 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 初始化时检查token并获取用户信息
-  if (token.value) {
-    fetchCurrentUser();
+  // 验证token是否有效
+  async function validateToken() {
+    if (!token.value) {
+      return false;
+    }
+    try {
+      await axios.get<User>('http://127.0.0.1:8000/users/me');
+      return true;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        logout(); // token无效，自动登出
+      }
+      return false;
+    }
   }
+
+
 
   return {
     token,
@@ -102,5 +115,6 @@ export const useAuthStore = defineStore('auth', () => {
     register,
     logout,
     fetchCurrentUser,
+    validateToken,
   };
 });

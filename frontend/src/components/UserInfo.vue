@@ -21,14 +21,11 @@
 <script setup lang="ts">
 import { useAuthStore } from '@/stores/authStore';
 import { UserOutlined } from '@ant-design/icons-vue';
-import { useRouter } from 'vue-router';
 
 const authStore = useAuthStore();
-const router = useRouter();
 
 const handleLogout = () => {
   authStore.logout();
-  router.push('/auth');
 };
 </script>
 
