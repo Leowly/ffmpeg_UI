@@ -53,8 +53,8 @@ def delete_file(db: Session, file_id: int):
 
 # --- Task CRUD Operations ---
 
-def get_user_tasks(db: Session, owner_id: int):
-    return db.query(models.ProcessingTask).filter(models.ProcessingTask.owner_id == owner_id).all()
+def get_user_tasks(db: Session, owner_id: int, skip: int = 0, limit: int = 100):
+    return db.query(models.ProcessingTask).filter(models.ProcessingTask.owner_id == owner_id).offset(skip).limit(limit).all()
 
 def get_task(db: Session, task_id: int):
     """
@@ -86,4 +86,11 @@ def update_task(db: Session, task_id: int, status: str, details: str | None = No
                 pass
         db.commit()
         db.refresh(db_task)
+    return db_task
+
+def delete_task(db: Session, task_id: int):
+    db_task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
+    if db_task:
+        db.delete(db_task)
+        db.commit()
     return db_task

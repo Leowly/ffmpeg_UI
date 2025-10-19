@@ -256,6 +256,8 @@ onBeforeUnmount(() => {
 
 .operation-section {
   margin-top: 16px;
+  padding-right: 2px;
+  padding-left: 2px;
 }
 
 .time-input-grid {

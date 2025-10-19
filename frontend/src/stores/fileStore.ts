@@ -50,6 +50,7 @@ export interface FFProbeResult {
 export interface Task {
   id: number;
   ffmpeg_command: string;
+  source_filename: string | null; // 新增字段
   output_path: string | null;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   details: string | null;
@@ -68,6 +69,7 @@ export const useFileStore = defineStore('file', () => {
   const error = ref<string | null>(null)
   const startTime = ref(0)
   const endTime = ref(0)
+  const triggerTaskPanel = ref(false) // 用于触发侧边栏任务列表展开的信号
 
   // 用于轮询的定时器ID，这是管理轮询的核心
   const taskPoller: Ref<number | null> = ref(null)
@@ -106,6 +108,7 @@ export const useFileStore = defineStore('file', () => {
 
     try {
       const response = await axios.get<Task[]>(API_ENDPOINTS.TASK_LIST);
+      // 强制使用后端数据覆盖本地状态
       taskList.value = response.data;
 
       let justCompleted = false;
@@ -153,7 +156,7 @@ export const useFileStore = defineStore('file', () => {
         // 当没有活动任务时，自动停止轮询
         stopTaskPolling();
       }
-    }, 3000); // 每3秒查询一次
+    }, 2000); // 每2秒查询一次
   }
 
   /**
@@ -219,30 +222,85 @@ export const useFileStore = defineStore('file', () => {
   /**
    * 当用户发起处理请求后，将新任务添加到列表，并确保轮询已启动
    */
-  function addTasks(tasks: Task[]) {
-    // 使用 unshift 将新任务放在列表顶部
-    taskList.value.unshift(...tasks);
+  function addTasks(newTasks: Task[]) {
+    newTasks.forEach(newTask => {
+      const existingIndex = taskList.value.findIndex(task => task.id === newTask.id);
+      if (existingIndex !== -1) {
+        // 如果任务已存在，则更新它
+        taskList.value[existingIndex] = newTask;
+      } else {
+        // 如果任务不存在，则添加到列表顶部
+        taskList.value.unshift(newTask);
+      }
+    });
+
     // 如果有活动任务，立即启动轮询
     if (hasActiveTasks.value) {
       startTaskPolling();
     }
+    // 触发UI展开任务面板
+    expandTaskPanel();
+  }
+
+  /**
+   * 触发任务面板展开，并随后重置状态
+   */
+  function expandTaskPanel() {
+    triggerTaskPanel.value = true;
+    // 短暂延迟后重置，以便下次可以再次触发
+    setTimeout(() => {
+      triggerTaskPanel.value = false;
+    }, 500);
   }
 
   /**
    * 从服务器和前端列表中删除一个文件
    */
-  async function removeFile(fileId: string) {
+async function removeFile(fileId: string) {
+  try {
+    // 使用 apiClient，它会自动处理认证
+    await axios.delete(
+      `${API_ENDPOINTS.DELETE_FILE}?filename=${fileId}`,
+    );
+
+    // UI 更新逻辑
+    fileList.value = fileList.value.filter((f) => f.id !== fileId);
+    if (selectedFileId.value === fileId) {
+      selectFile(null);
+    }
+    message.success('文件删除成功');
+
+  } catch (error: unknown) { // 捕获的 error 是 unknown 类型
+    let errorMsg = '文件删除失败'; // 默认错误信息
+
+    // 1. 首先检查它是否是一个 Axios 错误
+    if (isAxiosError(error)) {
+      errorMsg = error.response?.data?.detail || error.message || errorMsg;
+    }
+    // 2. 其次，检查它是否是一个标准的 JavaScript Error 对象
+    else if (error instanceof Error) {
+      // 在这里，TypeScript 知道 'error' 是一个 Error
+      // 我们可以安全地访问 error.message
+      errorMsg = error.message;
+    }
+
+    // 现在显示最终确定的错误信息
+    message.error(errorMsg);
+    console.error('Failed to delete file:', error);
+  }
+}
+
+  /**
+   * 从服务器和前端列表中删除一个任务记录
+   */
+  async function removeTask(taskId: number) {
     try {
-      await axios.delete(API_ENDPOINTS.DELETE_FILE(fileId));
-      fileList.value = fileList.value.filter((f) => f.id !== fileId);
-      if (selectedFileId.value === fileId) {
-        selectFile(null);
-      }
-      message.success('文件删除成功');
+      await axios.delete(API_ENDPOINTS.DELETE_TASK(taskId));
+      taskList.value = taskList.value.filter((t) => t.id !== taskId);
+      message.success(`任务 #${taskId} 已清除`);
     } catch (error) {
-      message.error('文件删除失败');
-      console.error('Failed to delete file:', error);
-      throw error; // 重新抛出错误，以便UI层可以捕获
+      message.error(`任务 #${taskId} 清除失败`);
+      console.error('Failed to delete task:', error);
     }
   }
 
@@ -274,11 +332,11 @@ export const useFileStore = defineStore('file', () => {
   // --- 返回暴露给组件的 state, getters, 和 actions ---
   return {
     // State
-    selectedFileId, fileList, taskList, isLoading, fileInfo, error, startTime, endTime,
+    selectedFileId, fileList, taskList, isLoading, fileInfo, error, startTime, endTime, triggerTaskPanel,
     // Getters
     totalDuration, hasActiveTasks,
     // Actions
-    selectFile, fetchFileList, fetchTaskList, addFile, addTasks, removeFile, updateTrimTimes,
+    selectFile, fetchFileList, fetchTaskList, addFile, addTasks, removeFile, removeTask, updateTrimTimes,
     initializeStore // 暴露初始化方法
   }
 })

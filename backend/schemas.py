@@ -57,18 +57,18 @@ class ProcessPayload(BaseModel):
 # --- Task Schemas ---
 class TaskBase(BaseModel):
     ffmpeg_command: str
+    source_filename: str | None = None # 添加到基础模型
 
 class TaskCreate(TaskBase):
-    # output_path is generated server-side, do not accept from client
     pass
 
 class Task(TaskBase):
     id: int
+    output_path: str | None
     status: str
-    details: Optional[str] = None
-    output_path: Optional[str] = None # 新增
-    progress: Optional[int] = 0
+    details: str | None
     owner_id: int
+    progress: int
 
     class Config:
         from_attributes = True

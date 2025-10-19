@@ -8,6 +8,8 @@ import logging
 import shlex
 import sys
 from typing import cast, List, Tuple
+from queue import Queue, Empty
+from threading import Thread
 
 # 策略设置现在由 run.py 处理，但保留在这里也无害
 if sys.platform == "win32":
@@ -18,15 +20,15 @@ if sys.platform == "win32":
     except Exception as e:
         print(f">>> Gemini: Could not set Proactor policy: {e}")
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile,  BackgroundTasks
+from fastapi.responses import StreamingResponse
 import aiofiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import crud, models, schemas, security
-from .database import SessionLocal, engine, DB_PATH
+from .database import SessionLocal, engine
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -73,41 +75,54 @@ def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
 # --- 核心修改：新的阻塞式 FFmpeg 执行函数 ---
 def run_ffmpeg_blocking(
     command_args: list, task_id: int, total_duration: float
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, List[int]]:
     """
     在一个独立的线程中执行的、阻塞的 FFmpeg 函数。
-    这避免了与 asyncio 事件循环的直接冲突。
-    返回一个元组 (success: bool, full_stderr: str)
+    使用非阻塞的输出读取和30秒的停滞超时。
+    返回一个元组 (success: bool, full_stderr: str, progress_updates: List[int])
     """
-    from .database import SessionLocal as TaskSessionLocal
-    from . import crud
     import re
+    from queue import Queue, Empty
+    from threading import Thread
 
-    db = TaskSessionLocal()
     time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
     logger = logging.getLogger("ffmpeg_runner")
+    proc = None
+    progress_updates = []
 
     try:
-        # 使用经典的 subprocess.Popen，它在任何环境下都能工作
         proc = subprocess.Popen(
             command_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,  # 使用 text=True 自动解码
+            text=True,
             errors='ignore',
-            # 在Windows上隐藏命令行窗口
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
+
+        q: Queue[str] = Queue()
+        
+        def reader_thread(pipe, queue):
+            try:
+                if pipe:
+                    for line in iter(pipe.readline, ''):
+                        queue.put(line)
+            finally:
+                if pipe:
+                    pipe.close()
+
+        if proc.stderr:
+            Thread(target=reader_thread, args=(proc.stderr, q), daemon=True).start()
 
         stderr_lines: list[str] = []
         last_progress = -1
 
-        # 逐行读取 stderr。因为在后台线程，这里的阻塞是安全的。
-        if proc.stderr:
-            for line in iter(proc.stderr.readline, ""):
+        while True:
+            try:
+                line = q.get(timeout=30)
                 if not line:
                     break
-                logger.info(line.strip())
+                
                 stderr_lines.append(line)
                 m = time_re.search(line)
                 if m:
@@ -117,29 +132,40 @@ def run_ffmpeg_blocking(
                         if total_duration > 0:
                             progress = int(min(100, (elapsed / total_duration) * 100))
                             if progress != last_progress:
-                                # 注意：频繁的数据库写入可能会成为瓶颈，但对于单个任务是可接受的
-                                crud.update_task(db, task_id=task_id, status="processing", progress=progress, details=''.join(stderr_lines[-20:]))
+                                progress_updates.append(progress)
                                 last_progress = progress
                     except Exception:
                         pass
-        
-        # 等待进程结束
+            except Empty:
+                if proc.poll() is not None:
+                    break
+                else:
+                    raise subprocess.TimeoutExpired(proc.args, 30)
+
         proc.wait()
         full_stderr = "".join(stderr_lines)
 
         if proc.returncode == 0:
-            return True, full_stderr
+            return True, full_stderr, progress_updates
         else:
-            # 如果 proc.stderr 为空，尝试读取 stdout 获取错误信息
             if not full_stderr and proc.stdout:
                 full_stderr = proc.stdout.read()
-            return False, full_stderr
+            return False, full_stderr, progress_updates
+
+    except FileNotFoundError:
+        logger.error(f"FFmpeg command not found for task {task_id}. Ensure ffmpeg is in the system's PATH.")
+        return False, "FFmpeg executable not found. Please ensure it is installed and in the system's PATH.", []
+    
+    except subprocess.TimeoutExpired:
+        error_msg = "FFmpeg process timed out after 30 seconds of no output."
+        logger.error(f"FFmpeg process for task {task_id} timed out.")
+        if proc:
+            proc.kill()
+        return False, error_msg, progress_updates
 
     except Exception as e:
         logger.error(f"Exception in blocking runner for task {task_id}: {e!r}", exc_info=True)
-        return False, str(e)
-    finally:
-        db.close()
+        return False, str(e), []
 
 
 # --- 核心修改：重构后的异步任务包装器 ---
@@ -149,50 +175,53 @@ async def run_ffmpeg_process(
     total_duration: float, 
     display_command: str = "", 
     temp_output_path: str = "", 
-    final_output_path: str = ""
+    final_output_path: str = "",
+    final_display_name: str = ""
 ):
     """
     异步包装器，使用 run_in_executor 将阻塞的 FFmpeg 任务移到后台线程。
+    此函数处理所有数据库状态更新。
     """
-    from .database import SessionLocal as TaskSessionLocal
-    from . import crud, schemas
-
-    db = TaskSessionLocal()
+    db = SessionLocal()
     logger = logging.getLogger("ffmpeg_runner")
     if not logger.handlers:
         logging.basicConfig(level=logging.INFO)
 
     try:
         logger.info(f"run_ffmpeg_process: start task_id={task_id}, command={display_command}")
-        crud.update_task(db, task_id=task_id, status="processing")
+        crud.update_task(db, task_id=task_id, status="processing", progress=0)
 
         loop = asyncio.get_running_loop()
         
-        # 将阻塞函数和其参数传递给执行器
-        success, full_stderr = await loop.run_in_executor(
-            None,  # 使用默认的 ThreadPoolExecutor
+        success, full_stderr, progress_updates = await loop.run_in_executor(
+            None,
             run_ffmpeg_blocking,
             command_args,
             task_id,
             total_duration
         )
 
+        # 即使失败，也尝试更新最后的进度
+        if progress_updates:
+            final_progress = progress_updates[-1]
+            crud.update_task(db, task_id=task_id, status="processing", progress=final_progress)
+
         if success:
             logger.info(f"Task {task_id} blocking process completed successfully.")
             try:
                 if os.path.exists(final_output_path):
                     os.remove(final_output_path)
-                os.rename(temp_output_path, final_output_path)
-                
+                os.replace(temp_output_path, final_output_path)
+
                 task = crud.get_task(db, task_id)
                 if task:
                     new_file_schema = schemas.FileCreate(
-                        filename=os.path.basename(final_output_path),
+                        filename=final_display_name or os.path.basename(final_output_path),
                         filepath=final_output_path,
                         status="processed"
                     )
                     crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
-                
+
                 crud.update_task(db, task_id=task_id, status="completed", details=full_stderr, progress=100)
                 logger.info(f"Task {task_id} post-processing finished. Output: {final_output_path}")
 
@@ -204,7 +233,7 @@ async def run_ffmpeg_process(
                     os.remove(temp_output_path)
         else:
             logger.error(f"Task {task_id} blocking process failed. Stderr: {full_stderr}")
-            crud.update_task(db, task_id=task_id, status="failed", details=full_stderr, progress=0)
+            crud.update_task(db, task_id=task_id, status="failed", details=full_stderr)
             if os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
 
@@ -290,42 +319,50 @@ async def get_file_info(
     db_file = crud.get_file_by_id(db, file_id=file_id)
     if not db_file or db_file.owner_id != current_user.id:
         raise HTTPException(status_code=404, detail="File not found or not owned by user")
+    
     file_path = db_file.filepath
-
-    # Use helper to resolve potential moved/legacy file locations
-    resolved = reconstruct_file_path(file_path, current_user.id)
+    resolved = await asyncio.get_running_loop().run_in_executor(
+        None, reconstruct_file_path, file_path, current_user.id
+    )
     if not resolved:
         raise HTTPException(status_code=404, detail="File not found on server")
     file_path = resolved
 
-    try:
-        # Use asyncio subprocess to avoid blocking the event loop
+    def run_ffprobe_sync(path: str) -> Tuple[int, str, str]:
+        """在一个独立的线程中执行的、阻塞的 ffprobe 函数"""
         command = [
-            "ffprobe",
-            "-v",
-            "quiet",
-            "-print_format",
-            "json",
-            "-show_format",
-            "-show_streams",
-            file_path,
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", path,
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                errors='ignore',
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            return result.returncode, result.stdout, result.stderr
+        except FileNotFoundError:
+            raise
 
-        if proc.returncode != 0:
-            # decode stderr for readable error message
-            err_text = stderr.decode(errors="ignore") if stderr else ""
-            raise HTTPException(status_code=500, detail=f"ffprobe error: {err_text}")
+    try:
+        loop = asyncio.get_running_loop()
+        returncode, stdout, stderr = await loop.run_in_executor(
+            None, run_ffprobe_sync, file_path
+        )
+
+        if returncode != 0:
+            raise HTTPException(status_code=500, detail=f"ffprobe error: {stderr}")
 
         try:
-            return json.loads(stdout.decode())
+            return json.loads(stdout)
         except json.JSONDecodeError:
             raise HTTPException(status_code=500, detail="Could not parse ffprobe output")
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="ffprobe command not found. Please ensure FFmpeg is installed and in the system's PATH.")
     except HTTPException:
         raise
     except Exception as e:
@@ -443,11 +480,12 @@ async def process_files(
         # 1. 获取不带扩展名的原始文件名和扩展名
         original_filename_base, _ = os.path.splitext(db_file.filename)
 
-        # 2. 构造带有 "_processed" 后缀的最终目标文件名
-        final_output_filename = f"{original_filename_base}_processed.{payload.container}"
-        
-        # 3. 确定最终处理完成后的文件在磁盘上的完整路径
-        final_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), final_output_filename))
+        # 2. 构造带有 "_processed" 后缀的显示用目标文件名 (保存在 DB 中作为 filename)
+        final_display_name = f"{original_filename_base}_processed.{payload.container}"
+
+        # 3. 确定最终处理完成后在磁盘上将使用的 UUID 文件名（保持扩展名）
+        final_disk_filename = f"{uuid.uuid4()}.{payload.container}"
+        final_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), final_disk_filename))
         
         # 4. 创建一个临时的、唯一的输出路径，FFmpeg 将先写入这里
         temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
@@ -503,7 +541,10 @@ async def process_files(
         logging.getLogger("ffmpeg_runner").info(f"FFmpeg command string: {ffmpeg_command_str}")
 
         # --- 创建数据库任务记录 ---
-        task_in = schemas.TaskCreate(ffmpeg_command=ffmpeg_command_str)
+        task_in = schemas.TaskCreate(
+            ffmpeg_command=ffmpeg_command_str,
+            source_filename=db_file.filename # 将源文件名存入DB
+        )
         # 关键：我们将 `final_output_path` 存入数据库，这是任务最终产物的路径
         db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=final_output_path)
 
@@ -517,7 +558,8 @@ async def process_files(
             payload.totalDuration, 
             display_command=ffmpeg_command_str, 
             temp_output_path=temp_output_path,
-            final_output_path=final_output_path
+            final_output_path=final_output_path,
+            final_display_name=final_display_name,
         )
         created_tasks.append(db_task)
 
@@ -532,12 +574,32 @@ async def process_files(
 
 @app.get("/api/tasks", response_model=List[schemas.Task], tags=["Tasks"])
 def get_tasks(
+    skip: int = 0,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取当前用户的所有处理任务"""
-    return crud.get_user_tasks(db, owner_id=current_user.id)
+    """获取当前用户的所有处理任务，支持分页"""
+    return crud.get_user_tasks(db, owner_id=current_user.id, skip=skip)
 
+
+@app.delete("/api/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"])
+def delete_task(
+    task_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除指定的任务记录"""
+    db_task = crud.get_task(db, task_id=task_id)
+    if db_task and db_task.owner_id != current_user.id:
+        # 如果任务存在但不属于当前用户，则拒绝操作
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this task")
+    
+    # 如果任务存在且属于用户，则删除
+    if db_task:
+        crud.delete_task(db, task_id=task_id)
+    
+    # 如果任务不存在，也直接返回成功，简化客户端逻辑
+    return
 
 
 
