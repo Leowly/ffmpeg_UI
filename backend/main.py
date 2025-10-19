@@ -19,7 +19,8 @@ if sys.platform == "win32":
         print(f">>> Gemini: Could not set Proactor policy: {e}")
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+import aiofiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,6 +49,26 @@ app.add_middleware(
 # --- Configuration ---
 UPLOAD_DIRECTORY = "./backend/workspaces"
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
+
+
+def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
+    """Try to reconstruct a file path for backward compatibility.
+
+    If the stored_path exists, return it. Otherwise try to find the file under
+    UPLOAD_DIRECTORY/<user_id>/<basename(stored_path)> and return that if it exists.
+    Return None if no valid path found.
+    """
+    if os.path.exists(stored_path):
+        return stored_path
+
+    expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(user_id))
+    unique_filename = os.path.basename(stored_path)
+    reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
+
+    if os.path.exists(reconstructed_file_path):
+        return reconstructed_file_path
+
+    return None
 
 # --- 核心修改：新的阻塞式 FFmpeg 执行函数 ---
 def run_ffmpeg_blocking(
@@ -256,7 +277,7 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 
 
 @app.get("/api/file-info", tags=["Files"])
-def get_file_info(
+async def get_file_info(
     filename: str,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -271,66 +292,72 @@ def get_file_info(
         raise HTTPException(status_code=404, detail="File not found or not owned by user")
     file_path = db_file.filepath
 
-    if not os.path.exists(file_path):
-        # If the file is not found at the stored path, try to reconstruct it
-        # This handles cases where files were uploaded before user-specific directories were implemented
-        expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
-        # Extract the unique filename from the stored filepath
-        unique_filename = os.path.basename(file_path)
-        reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
-
-        if os.path.exists(reconstructed_file_path):
-            file_path = reconstructed_file_path
-            # Optionally, update the database with the new path for future consistency
-            # crud.update_file_path(db, db_file.id, reconstructed_file_path)
-        else:
-            raise HTTPException(status_code=404, detail="File not found on server")
+    # Use helper to resolve potential moved/legacy file locations
+    resolved = reconstruct_file_path(file_path, current_user.id)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="File not found on server")
+    file_path = resolved
 
     try:
+        # Use asyncio subprocess to avoid blocking the event loop
         command = [
             "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
-            file_path
+            file_path,
         ]
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        return json.loads(result.stdout)
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"ffprobe error: {e.stderr}")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Could not parse ffprobe output")
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            # decode stderr for readable error message
+            err_text = stderr.decode(errors="ignore") if stderr else ""
+            raise HTTPException(status_code=500, detail=f"ffprobe error: {err_text}")
+
+        try:
+            return json.loads(stdout.decode())
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Could not parse ffprobe output")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
 @app.get("/api/files", response_model=List[schemas.FileResponseForFrontend], tags=["Files"])
-def read_user_files(
+async def read_user_files(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     db_files = crud.get_user_files(db, user_id=current_user.id)
     response_files = []
+    loop = asyncio.get_running_loop()
+
     for db_file in db_files:
         current_file_path = db_file.filepath
-        resolved_file_path = None # Initialize to None
+        resolved_file_path = None  # Initialize to None
 
-        if os.path.exists(current_file_path):
+        # Check existence using executor to avoid blocking
+        exists = await loop.run_in_executor(None, os.path.exists, current_file_path)
+        if exists:
             resolved_file_path = current_file_path
         else:
-            # Try to reconstruct
-            expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
-            unique_filename = os.path.basename(current_file_path)
-            reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
+            # run reconstruct_file_path in executor as it uses os.path.exists internally
+            resolved_candidate = await loop.run_in_executor(None, reconstruct_file_path, current_file_path, current_user.id)
+            if resolved_candidate:
+                resolved_file_path = resolved_candidate
+                # Optionally update DB: crud.update_file_path(db, db_file.id, resolved_candidate)
 
-            if os.path.exists(reconstructed_file_path):
-                resolved_file_path = reconstructed_file_path
-                # Optionally, update the database with the new path for future consistency
-                # crud.update_file_path(db, db_file.id, reconstructed_file_path)
-
-        if resolved_file_path: # Only proceed if a valid path was found
-            file_size = os.path.getsize(resolved_file_path)
+        if resolved_file_path:  # Only proceed if a valid path was found
+            file_size = await loop.run_in_executor(None, os.path.getsize, resolved_file_path)
             response_files.append(schemas.FileResponseForFrontend(
                 uid=str(db_file.id),
                 id=str(db_file.id),
@@ -340,7 +367,7 @@ def read_user_files(
                 response=schemas.FileResponseInner(
                     file_id=str(db_file.id),
                     original_name=db_file.filename,
-                    temp_path=resolved_file_path # Use the resolved path here
+                    temp_path=resolved_file_path  # Use the resolved path here
                 )
             ))
 
@@ -348,7 +375,7 @@ def read_user_files(
 
 
 @app.get("/api/download-file/{file_id}", tags=["Files"])
-def download_file(
+async def download_file(
     file_id: str,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -363,22 +390,23 @@ def download_file(
         raise HTTPException(status_code=404, detail="File not found or not owned by user")
 
     file_path = db_file.filepath
-    if not os.path.exists(file_path):
-        # If the file is not found at the stored path, try to reconstruct it
-        # This handles cases where files were uploaded before user-specific directories were implemented
-        expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
-        # Extract the unique filename from the stored filepath
-        unique_filename = os.path.basename(file_path)
-        reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
+    loop = asyncio.get_running_loop()
+    resolved = await loop.run_in_executor(None, reconstruct_file_path, file_path, current_user.id)
+    if resolved:
+        file_path = resolved
+    else:
+        raise HTTPException(status_code=404, detail="File not found on server")
 
-        if os.path.exists(reconstructed_file_path):
-            file_path = reconstructed_file_path
-            # Optionally, update the database with the new path for future consistency
-            # crud.update_file_path(db, db_file.id, reconstructed_file_path)
-        else:
-            raise HTTPException(status_code=404, detail="File not found on server")
+    async def file_iterator(path: str, chunk_size: int = 1024 * 1024):
+        async with aiofiles.open(path, "rb") as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
 
-    return FileResponse(path=file_path, filename=db_file.filename, media_type="application/octet-stream")
+    headers = {"Content-Disposition": f'attachment; filename="{db_file.filename}"'}
+    return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
 
 @app.post("/api/process", response_model=List[schemas.Task], tags=["Files"])
 async def process_files(
@@ -532,7 +560,7 @@ def get_task_status(
 
 
 @app.delete("/api/delete-file", tags=["Files"])
-def delete_user_file(
+async def delete_user_file(
     filename: str,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -548,26 +576,23 @@ def delete_user_file(
 
     # Delete physical file
     file_path = db_file.filepath
-    if not os.path.exists(file_path):
-        # If the file is not found at the stored path, try to reconstruct it
-        expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
-        unique_filename = os.path.basename(file_path)
-        reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
+    loop = asyncio.get_running_loop()
+    resolved = await loop.run_in_executor(None, reconstruct_file_path, file_path, current_user.id)
+    if resolved:
+        file_path = resolved
 
-        if os.path.exists(reconstructed_file_path):
-            file_path = reconstructed_file_path
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    exists = await loop.run_in_executor(None, os.path.exists, file_path)
+    if exists:
+        await loop.run_in_executor(None, os.remove, file_path)
 
     # Delete database record
-    crud.delete_file(db, file_id=file_id)
+    await loop.run_in_executor(None, crud.delete_file, db, file_id)
 
     return {"message": f"File {filename} deleted successfully"}
 
 
 @app.post("/api/upload", response_model=schemas.FileResponseForFrontend, tags=["Files"])
-def upload_file(
+async def upload_file(
     file: UploadFile,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -583,35 +608,44 @@ def upload_file(
 
         file_location = os.path.normpath(os.path.join(user_upload_directory, unique_filename))
 
-        with open(file_location, "wb") as buffer:
-            buffer.write(file.file.read())
+        # Write file in chunks asynchronously
+        async with aiofiles.open(file_location, "wb") as out_f:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                await out_f.write(chunk)
 
-        # Get file size after writing
-        file_size = os.path.getsize(file_location)
+        # Get file size after writing (use executor to call os.path.getsize)
+        loop = asyncio.get_running_loop()
+        file_size = await loop.run_in_executor(None, os.path.getsize, file_location)
 
-        # Create a database entry for the uploaded file
-        db_file = crud.create_user_file(
-            db=db,
-            file=schemas.FileCreate(
-                filename=file.filename,
-                filepath=file_location,
-                status="uploaded"
-            ),
-            user_id=current_user.id
-        )
+        # Create a database entry for the uploaded file in executor to avoid blocking
+        def db_create():
+            return crud.create_user_file(
+                db=db,
+                file=schemas.FileCreate(
+                    filename=file.filename,
+                    filepath=file_location,
+                    status="uploaded"
+                ),
+                user_id=current_user.id
+            )
+
+        db_file = await loop.run_in_executor(None, db_create)
 
         # Construct response to match frontend's UserFile interface
         return schemas.FileResponseForFrontend(
             uid=str(db_file.id),
             id=str(db_file.id),
             name=db_file.filename,
-            status="done", # Assuming 'done' after successful upload and DB entry
+            status="done",  # Assuming 'done' after successful upload and DB entry
             size=file_size,
             response=schemas.FileResponseInner(
                 file_id=str(db_file.id),
                 original_name=db_file.filename,
-                temp_path=db_file.filepath
-            )
+                temp_path=db_file.filepath,
+            ),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
