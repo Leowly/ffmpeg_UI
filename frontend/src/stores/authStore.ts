@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { message } from 'ant-design-vue'
 import { API_ENDPOINTS } from '@/api'
+import { useFileStore } from '@/stores/fileStore'
 
 // 定义用户接口
 interface User {
@@ -36,6 +37,11 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('access_token', token.value!)
       axios.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
       await fetchCurrentUser(); // 登录成功后立即获取用户信息
+      
+      // 登录成功后获取文件列表
+      const fileStore = useFileStore();
+      await fileStore.initializeStore();
+      
       message.success('登录成功！')
       return true
     } catch (error: unknown) {

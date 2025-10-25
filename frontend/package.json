@@ -16,6 +16,9 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/filesystem": "^7.1.4",
     "ant-design-vue": "^4.2.6",
     "axios": "^1.12.2",
     "pinia": "^3.0.3",

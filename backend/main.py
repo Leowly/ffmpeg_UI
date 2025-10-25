@@ -59,7 +59,17 @@ app = FastAPI(
 )
 
 # --- CORS Configuration ---
-origins = ["http://localhost", "http://localhost:5173"]
+# 添加对Capacitor移动端的CORS支持
+origins = [
+    "http://localhost", 
+    "http://localhost:5173",
+    "https://ffmpeg.0426233.xyz",  # 您的部署地址
+    "https://*.capacitor.localhost",  # Capacitor移动应用
+    "capacitor://localhost",         # Capacitor本地URL
+    "ionic://localhost",             # Ionic本地URL
+    "https://localhost"              # 其他可能的本地地址
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -67,6 +77,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # 暴露 Content-Disposition 头
+    allow_origin_regex=r"https://.*\.capacitor\.localhost"  # 支持Capacitor的正则匹配
 )
 
 # --- Configuration ---

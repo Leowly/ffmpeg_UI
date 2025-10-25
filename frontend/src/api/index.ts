@@ -1,6 +1,20 @@
 // src/api/index.ts
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL
+// 根据运行环境智能确定API基础URL
+let BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+// 检查是否在Capacitor环境中运行
+if (window.Capacitor) {
+  // 在Capacitor环境中，使用Capacitor的服务器URL
+  // 注意：这需要在Capacitor配置中设置服务器URL
+  const capacitorServerUrl = window.Capacitor.getServerUrl ? window.Capacitor.getServerUrl() : null;
+  if (capacitorServerUrl) {
+    BASE_URL = capacitorServerUrl;
+  } else {
+    // 如果Capacitor没有配置服务器URL，可以使用默认值或抛出错误
+    console.warn('Capacitor server URL is not configured. Please set the server URL in capacitor.config.ts');
+  }
+}
 
 export const API_ENDPOINTS = {
   TOKEN: `${BASE_URL}/token`,

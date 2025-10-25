@@ -158,7 +158,7 @@ watch(
   (newStatus, oldStatus) => {
     if (newStatus === 'processing') {
       startProgressPolling()
-    } else if (oldStatus === 'processing' && newStatus !== 'processing') {
+    } else if (oldStatus === 'processing') {
       stopProgressPolling()
       // 当任务从处理中变为完成时，确保进度条达到100%
       if (newStatus === 'completed') {

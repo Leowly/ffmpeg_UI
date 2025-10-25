@@ -4,6 +4,8 @@ import { ref, type Ref, computed, onUnmounted } from 'vue'
 import axios, { isAxiosError } from 'axios'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
+import { Capacitor } from '@capacitor/core'
+import { Filesystem, Directory } from '@capacitor/filesystem'
 
 // --- 类型定义 ---
 
@@ -402,20 +404,42 @@ export const useFileStore = defineStore('file', () => {
         }
       }
 
-      // 创建 Blob URL 并触发下载
       const blob = new Blob([response.data], { type: response.headers['content-type'] })
-      const link = document.createElement('a')
-      link.href = window.URL.createObjectURL(blob)
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
 
-      // 清理
-      window.URL.revokeObjectURL(link.href)
-      document.body.removeChild(link)
+      // ** [修改] 平台检测和原生下载 **
+      if (Capacitor.isNativePlatform()) {
+        // --- 原生平台 (Android/iOS) ---
+        const reader = new FileReader()
+        reader.readAsDataURL(blob)
+        reader.onloadend = async () => {
+          const base64data = reader.result as string
+          try {
+            await Filesystem.writeFile({
+              path: filename,
+              data: base64data,
+              directory: Directory.Documents, // 保存到文档目录
+            })
+            loadingMessage()
+            message.success(`文件 "${filename}" 已保存到“下载”文件夹。`)
+          } catch (e) {
+            loadingMessage()
+            console.error('Unable to save file', e)
+            message.error('文件保存失败。请检查应用权限。')
+          }
+        }
+      } else {
+        // --- Web 平台 ---
+        const link = document.createElement('a')
+        link.href = window.URL.createObjectURL(blob)
+        link.download = filename
+        document.body.appendChild(link)
+        link.click()
 
-      loadingMessage() // 关闭加载提示
-      message.success(`文件 "${filename}" 已开始下载。`)
+        window.URL.revokeObjectURL(link.href)
+        document.body.removeChild(link)
+        loadingMessage()
+        message.success(`文件 "${filename}" 已开始下载。`)
+      }
     } catch (error: unknown) {
       loadingMessage() // 关闭加载提示
       let errorMessage = '下载失败。'
@@ -424,7 +448,7 @@ export const useFileStore = defineStore('file', () => {
         if (error.response && error.response.data) {
           try {
             // 尝试将Blob错误响应解析为JSON文本
-            const errorText = await error.response.data.text()
+            const errorText = await (error.response.data as Blob).text()
             const errorJson = JSON.parse(errorText)
             errorMessage = errorJson.detail || '无法解析错误详情'
           } catch (e) {
