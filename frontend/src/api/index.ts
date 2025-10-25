@@ -12,6 +12,8 @@ export const API_ENDPOINTS = {
   FILE_INFO: (fileId: string) => `${BASE_URL}/api/file-info?filename=${fileId}`,
   PROCESS_FILE: `${BASE_URL}/api/process`,
   TASK_LIST: `${BASE_URL}/api/tasks`,
+  TASK_PROGRESS: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}/progress`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
+  DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
   DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`, // 示例，可能需要实现
 }

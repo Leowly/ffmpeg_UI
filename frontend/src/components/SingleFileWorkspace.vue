@@ -17,7 +17,14 @@
 
     <!-- 成功加载文件信息 -->
     <div v-else-if="fileStore.fileInfo" class="file-workspace" ref="workspaceRef">
-      <a-page-header :title="selectedFile?.name || ''" :sub-title="mediaTypeDisplay" />
+      <a-page-header :title="selectedFile?.name || ''" :sub-title="mediaTypeDisplay">
+        <template #extra>
+          <a-button type="primary" @click="handleDownload">
+            <template #icon><DownloadOutlined /></template>
+            下载文件
+          </a-button>
+        </template>
+      </a-page-header>
 
       <a-descriptions bordered :column="descriptionColumns">
         <!-- 1. 通用信息 -->
@@ -124,6 +131,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
+import { DownloadOutlined } from '@ant-design/icons-vue'
 
 const fileStore = useFileStore()
 
@@ -202,6 +210,13 @@ const audioBitrate = computed(() => {
   }
   return 'N/A'
 })
+
+// --- Action Handlers ---
+const handleDownload = () => {
+  if (fileStore.selectedFileId) {
+    fileStore.downloadFile(fileStore.selectedFileId)
+  }
+}
 
 // --- Helper Functions ---
 const calculateFrameRate = (rateString: string): number => {
@@ -294,8 +309,8 @@ onBeforeUnmount(() => {
 
 .operation-section {
   margin-top: 16px;
-  padding-right: 2px;
-  padding-left: 2px;
+  padding-right: 3px;
+  padding-left: 3px;
 }
 
 .time-input-grid {
@@ -317,5 +332,21 @@ onBeforeUnmount(() => {
 
 .bottom-spacer {
   height: 40px; /* 预留给左下角浮动按钮的空间 */
+}
+
+/* --- 响应式布局 -- */
+@media (max-width: 768px) {
+  /* 使用 :deep() 选择器来穿透到子组件的样式 */
+  .file-workspace :deep(.ant-page-header-heading) {
+    flex-basis: 100%; /* 让标题区域占据整行 */
+  }
+  .file-workspace :deep(.ant-page-header-extra) {
+    margin-top: 16px; /* 与标题拉开距离 */
+    width: 100%; /* 占据整行 */
+    text-align: left; /* 按钮靠左对齐 */
+  }
+  .file-workspace :deep(.ant-page-header-extra .ant-btn) {
+    width: 100%; /* 按钮宽度撑满 */
+  }
 }
 </style>

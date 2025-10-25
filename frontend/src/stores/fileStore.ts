@@ -56,6 +56,7 @@ export interface Task {
   details: string | null
   owner_id: number
   progress: number
+  result_file_id: number | null // 新增：用于直接关联结果文件的ID
 }
 
 // --- Store 定义 ---
@@ -74,6 +75,7 @@ export const useFileStore = defineStore('file', () => {
 
   // 用于轮询的定时器ID，这是管理轮询的核心
   const taskPoller: Ref<number | null> = ref(null)
+  const isPollingPaused = ref(false) // 新增：用于暂停主轮询的状态
 
   // --- Getters ---
   const totalDuration = computed(() => {
@@ -151,6 +153,10 @@ export const useFileStore = defineStore('file', () => {
 
     console.log('>>> [FileStore] Starting task polling...')
     taskPoller.value = window.setInterval(async () => {
+      if (isPollingPaused.value) {
+        console.log('>>> [FileStore] Main polling is paused.')
+        return
+      }
       // 只要还有活动任务，就一直获取最新任务列表
       if (hasActiveTasks.value) {
         await fetchTaskList()
@@ -158,7 +164,7 @@ export const useFileStore = defineStore('file', () => {
         // 当没有活动任务时，自动停止轮询
         stopTaskPolling()
       }
-    }, 2000) // 每2秒查询一次
+    }, 3000) // 每3秒查询一次
   }
 
   /**
@@ -170,6 +176,20 @@ export const useFileStore = defineStore('file', () => {
       clearInterval(taskPoller.value)
       taskPoller.value = null
     }
+  }
+
+  /**
+   * 暂停主任务轮询（当高频轮询启动时）
+   */
+  function pauseMainPolling() {
+    isPollingPaused.value = true
+  }
+
+  /**
+   * 恢复主任务轮询
+   */
+  function resumeMainPolling() {
+    isPollingPaused.value = false
   }
 
   /**
@@ -256,6 +276,16 @@ export const useFileStore = defineStore('file', () => {
   }
 
   /**
+   * 更新单个任务的进度（由高频轮询器调用）
+   */
+  function updateTaskProgress(taskId: number, progress: number) {
+    const task = taskList.value.find((t) => t.id === taskId)
+    if (task && task.status === 'processing') {
+      task.progress = progress
+    }
+  }
+
+  /**
    * 从服务器和前端列表中删除一个文件
    */
   async function removeFile(fileId: string) {
@@ -316,22 +346,14 @@ export const useFileStore = defineStore('file', () => {
    * 根据任务信息定位到对应的处理后文件
    */
   function selectFileByTask(task: Task) {
-    if (!task.output_path) {
-      console.warn('任务没有输出文件路径')
+    if (!task.result_file_id) {
+      message.error('任务信息中缺少结果文件ID，无法定位文件。')
+      console.warn('任务没有输出文件ID', task)
       return
     }
 
-    // 从输出路径获取文件名
-    const outputFilename = task.output_path.split(/[\\/]/).pop()
-    if (!outputFilename) {
-      console.error('无法从输出路径获取文件名')
-      return
-    }
-
-    // 查找对应文件的ID
-    const targetFile = fileList.value.find((file) => {
-      return file.name.includes('_processed') && file.name.includes(outputFilename.split('.')[0])
-    })
+    // 使用结果文件ID直接、精确地查找文件
+    const targetFile = fileList.value.find((file) => file.id === String(task.result_file_id))
 
     if (targetFile) {
       // 选中文件并跳转到工作区
@@ -339,6 +361,10 @@ export const useFileStore = defineStore('file', () => {
       message.success(`已定位到文件: ${targetFile.name}`)
     } else {
       message.warning('未找到对应的处理后文件，请确保文件列表已刷新')
+      console.warn(
+        `Could not find file with ID ${task.result_file_id} in the current file list.`,
+        fileList.value
+      )
     }
   }
 
@@ -351,6 +377,65 @@ export const useFileStore = defineStore('file', () => {
     // 如果初始加载后发现有未完成的任务，则启动轮询
     if (hasActiveTasks.value) {
       startTaskPolling()
+    }
+  }
+
+  /**
+   * 使用 Axios 和 Blob 安全地下载文件, 解决 token 和新窗口问题
+   */
+  async function downloadFile(fileId: string) {
+    const downloadUrl = API_ENDPOINTS.DOWNLOAD_FILE(fileId)
+    const loadingMessage = message.loading('正在准备下载...', 0)
+
+    try {
+      const response = await axios.get(downloadUrl, {
+        responseType: 'blob' // 关键：期望响应是二进制数据
+      })
+
+      // 从 Content-Disposition 头中提取文件名
+      const contentDisposition = response.headers['content-disposition']
+      let filename = 'downloaded_file' // 默认文件名
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/)
+        if (filenameMatch && filenameMatch.length > 1) {
+          filename = decodeURIComponent(filenameMatch[1])
+        }
+      }
+
+      // 创建 Blob URL 并触发下载
+      const blob = new Blob([response.data], { type: response.headers['content-type'] })
+      const link = document.createElement('a')
+      link.href = window.URL.createObjectURL(blob)
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+
+      // 清理
+      window.URL.revokeObjectURL(link.href)
+      document.body.removeChild(link)
+
+      loadingMessage() // 关闭加载提示
+      message.success(`文件 "${filename}" 已开始下载。`)
+    } catch (error: unknown) {
+      loadingMessage() // 关闭加载提示
+      let errorMessage = '下载失败。'
+      if (isAxiosError(error)) {
+        // 对于Blob响应，错误信息可能需要特殊处理
+        if (error.response && error.response.data) {
+          try {
+            // 尝试将Blob错误响应解析为JSON文本
+            const errorText = await error.response.data.text()
+            const errorJson = JSON.parse(errorText)
+            errorMessage = errorJson.detail || '无法解析错误详情'
+          } catch (e) {
+            errorMessage = error.message || '发生未知网络错误'
+          }
+        }
+      } else if (error instanceof Error) {
+        errorMessage = error.message
+      }
+      message.error(errorMessage)
+      console.error('Download failed:', error)
     }
   }
 
@@ -385,5 +470,9 @@ export const useFileStore = defineStore('file', () => {
     updateTrimTimes,
     selectFileByTask,
     initializeStore, // 暴露初始化方法
+    updateTaskProgress, // 暴露给 TaskDetails 组件使用
+    pauseMainPolling,
+    resumeMainPolling,
+    downloadFile, // 暴露下载方法
   }
 })

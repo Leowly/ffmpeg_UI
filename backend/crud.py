@@ -45,6 +45,11 @@ def update_file_status(db: Session, file_id: int, new_status: str):
     return db_file
 
 def delete_file(db: Session, file_id: int):
+    # 首先，找到所有引用该文件的任务，并将它们的 result_file_id 设置为 None
+    db.query(models.ProcessingTask).filter(
+        models.ProcessingTask.result_file_id == file_id
+    ).update({"result_file_id": None}, synchronize_session=False)
+
     db_file = db.query(models.File).filter(models.File.id == file_id).first()
     if db_file:
         db.delete(db_file)
@@ -73,10 +78,11 @@ def create_task(db: Session, task: schemas.TaskCreate, owner_id: int, output_pat
     db.refresh(db_task)
     return db_task
 
-def update_task(db: Session, task_id: int, status: str, details: str | None = None, progress: int | None = None):
+def update_task(db: Session, task_id: int, status: str | None = None, details: str | None = None, progress: int | None = None, result_file_id: int | None = None):
     db_task = db.query(models.ProcessingTask).filter(models.ProcessingTask.id == task_id).first()
     if db_task:
-        db_task.status = status
+        if status:
+            db_task.status = status
         if details:
             db_task.details = details
         if progress is not None:
@@ -84,6 +90,8 @@ def update_task(db: Session, task_id: int, status: str, details: str | None = No
                 db_task.progress = int(progress)
             except Exception:
                 pass
+        if result_file_id is not None:
+            db_task.result_file_id = result_file_id
         db.commit()
         db.refresh(db_task)
     return db_task

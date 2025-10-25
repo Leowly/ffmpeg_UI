@@ -7,7 +7,15 @@ import asyncio
 import logging
 import shlex
 import sys
-from typing import cast, List, Tuple
+import threading
+from typing import cast, List, Tuple, Dict
+
+# --- 全局进度缓存 ---
+# 用于存储正在进行中的任务的实时进度
+# 格式: {task_id: progress}
+task_progress_cache: Dict[int, int] = {}
+_progress_lock = threading.Lock()
+
 
 def detect_video_codec(input_path: str) -> str:
     """返回输入视频的编码名称，例如 'av1', 'h264', 'hevc'"""
@@ -33,7 +41,7 @@ if sys.platform == "win32":
         print(f">>> Gemini: Could not set Proactor policy: {e}")
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile,  BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import aiofiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -58,6 +66,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],  # 暴露 Content-Disposition 头
 )
 
 # --- Configuration ---
@@ -87,11 +96,12 @@ def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
 # --- 核心修改：新的阻塞式 FFmpeg 执行函数 ---
 def run_ffmpeg_blocking(
     command_args: list, task_id: int, total_duration: float
-) -> Tuple[bool, str, List[int]]:
+) -> Tuple[bool, str]:
     """
     在一个独立的线程中执行的、阻塞的 FFmpeg 函数。
     使用非阻塞的输出读取和30秒的停滞超时。
-    返回一个元组 (success: bool, full_stderr: str, progress_updates: List[int])
+    实时将进度更新到全局缓存中。
+    返回一个元组 (success: bool, full_stderr: str)
     """
     import re
     from queue import Queue, Empty
@@ -100,7 +110,6 @@ def run_ffmpeg_blocking(
     time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
     logger = logging.getLogger("ffmpeg_runner")
     proc = None
-    progress_updates = []
 
     try:
         proc = subprocess.Popen(
@@ -144,7 +153,9 @@ def run_ffmpeg_blocking(
                         if total_duration > 0:
                             progress = int(min(100, (elapsed / total_duration) * 100))
                             if progress != last_progress:
-                                progress_updates.append(progress)
+                                # --- 核心修改: 更新全局缓存 ---
+                                with _progress_lock:
+                                    task_progress_cache[task_id] = progress
                                 last_progress = progress
                     except Exception:
                         pass
@@ -158,26 +169,31 @@ def run_ffmpeg_blocking(
         full_stderr = "".join(stderr_lines)
 
         if proc.returncode == 0:
-            return True, full_stderr, progress_updates
+            return True, full_stderr
         else:
             if not full_stderr and proc.stdout:
                 full_stderr = proc.stdout.read()
-            return False, full_stderr, progress_updates
+            return False, full_stderr
 
     except FileNotFoundError:
         logger.error(f"FFmpeg command not found for task {task_id}. Ensure ffmpeg is in the system's PATH.")
-        return False, "FFmpeg executable not found. Please ensure it is installed and in the system's PATH.", []
+        return False, "FFmpeg executable not found. Please ensure it is installed and in the system's PATH."
     
     except subprocess.TimeoutExpired:
         error_msg = "FFmpeg process timed out after 30 seconds of no output."
         logger.error(f"FFmpeg process for task {task_id} timed out.")
         if proc:
             proc.kill()
-        return False, error_msg, progress_updates
+        return False, error_msg
 
     except Exception as e:
         logger.error(f"Exception in blocking runner for task {task_id}: {e!r}", exc_info=True)
-        return False, str(e), []
+        return False, str(e)
+    finally:
+        # --- 核心修改: 任务结束时清理缓存 ---
+        with _progress_lock:
+            if task_id in task_progress_cache:
+                del task_progress_cache[task_id]
 
 
 # --- 核心修改：重构后的异步任务包装器 ---
@@ -205,18 +221,14 @@ async def run_ffmpeg_process(
 
         loop = asyncio.get_running_loop()
         
-        success, full_stderr, progress_updates = await loop.run_in_executor(
+        # --- 核心修改: 不再接收 progress_updates ---
+        success, full_stderr = await loop.run_in_executor(
             None,
             run_ffmpeg_blocking,
             command_args,
             task_id,
             total_duration
         )
-
-        # 即使失败，也尝试更新最后的进度
-        if progress_updates:
-            final_progress = progress_updates[-1]
-            crud.update_task(db, task_id=task_id, status="processing", progress=final_progress)
 
         if success:
             logger.info(f"Task {task_id} blocking process completed successfully.")
@@ -226,15 +238,23 @@ async def run_ffmpeg_process(
                 os.replace(temp_output_path, final_output_path)
 
                 task = crud.get_task(db, task_id)
+                new_db_file = None # 初始化
                 if task:
                     new_file_schema = schemas.FileCreate(
                         filename=final_display_name or os.path.basename(final_output_path),
                         filepath=final_output_path,
                         status="processed"
                     )
-                    crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
+                    new_db_file = crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
 
-                crud.update_task(db, task_id=task_id, status="completed", details=full_stderr, progress=100)
+                crud.update_task(
+                    db, 
+                    task_id=task_id, 
+                    status="completed", 
+                    details=full_stderr, 
+                    progress=100,
+                    result_file_id=new_db_file.id if new_db_file else None # 关联结果文件
+                )
                 logger.info(f"Task {task_id} post-processing finished. Output: {final_output_path}")
 
             except Exception as e:
@@ -521,13 +541,13 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
 
     # --- 4. 添加输入、裁剪和流映射 ---
 
+    # 输入文件必须在 seek 参数之前，以实现精确的输出 seek
+    command.extend(["-i", input_path])
+
     # 裁剪开始时间
     if params.startTime > 0:
         command.extend(["-ss", str(params.startTime)])
     
-    # 输入文件
-    command.extend(["-i", input_path])
-
     # 裁剪结束时间
     if params.endTime < params.totalDuration:
         command.extend(["-to", str(params.endTime)])
@@ -549,6 +569,10 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
     if not is_audio_only_output:
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
+            # 如果进行了裁剪，强制在剪辑的开头创建一个关键帧，以防止片头卡顿
+            if params.startTime > 0 or params.endTime < params.totalDuration:
+                command.extend(["-force_key_frames", "expr:eq(n,0)"])
+
             if params.videoBitrate:
                 command.extend(["-b:v", f"{params.videoBitrate}k"])
             if params.resolution:
@@ -689,6 +713,33 @@ def delete_task(
     
     # 如果任务不存在，也直接返回成功，简化客户端逻辑
     return
+
+
+@app.get("/api/tasks/{task_id}/progress", tags=["Tasks"])
+def get_task_progress(
+    task_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取指定任务的实时进度"""
+    # 1. (安全) 检查任务是否存在且属于当前用户
+    db_task = crud.get_task(db, task_id=task_id)
+    if not db_task or db_task.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    # 新增：检查任务是否失败
+    if db_task.status == 'failed':
+        return JSONResponse(content={"progress": -1})
+
+    # 2. 尝试从实时缓存中获取进度
+    with _progress_lock:
+        progress = task_progress_cache.get(task_id)
+
+    # 3. 如果缓存中没有（例如，任务刚开始或已结束），则从数据库回退
+    if progress is None:
+        progress = db_task.progress
+
+    return JSONResponse(content={"progress": progress})
 
 
 

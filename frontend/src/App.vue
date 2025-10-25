@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { onMounted, watch, ref, computed } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import AppSidebar from './components/AppSidebar.vue'
 import SingleFileWorkspace from './components/SingleFileWorkspace.vue'
 import AuthForm from './components/AuthForm.vue'
@@ -38,39 +38,20 @@ const selectTask = (taskId: number) => {
   selectedTaskId.value = taskId
 }
 
-// 创建一个标志，用于区分是初始加载还是状态变化
-let isInitialCheck = true
 
 onMounted(async () => {
+  // 应用启动时的核心逻辑：
+  // 1. 检查本地是否存在 token
   if (authStore.isLoggedIn) {
-    // 首先验证token是否有效
-    const isValid = await authStore.validateToken()
-    if (isValid) {
+    // 2. 如果存在，则尝试获取当前用户信息。此函数内部会处理 token 失效的情况（自动登出）
+    await authStore.fetchCurrentUser()
+
+    // 3. 如果用户信息成功获取，则初始化文件和任务列表
+    if (authStore.user) {
       fileStore.initializeStore()
-    } else {
-      // 如果token无效，确保用户状态被清除
-      authStore.logout()
     }
   }
-  isInitialCheck = false // 标记初始检查已完成
 })
-
-watch(
-  () => authStore.isLoggedIn,
-  async (newVal, oldVal) => {
-    // 仅当状态从“未登录”变为“已登录”时，才执行此逻辑块
-    // 排除初始加载的情况
-    if (newVal && !oldVal && !isInitialCheck) {
-      await authStore.fetchCurrentUser()
-      // 确保获取用户信息成功后再获取其他数据
-      if (authStore.user) {
-        fileStore.initializeStore()
-      }
-    }
-    isInitialCheck = false // 在任何状态变化后都设置为false
-  },
-  { immediate: true },
-)
 </script>
 
 <template>

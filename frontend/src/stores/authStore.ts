@@ -35,7 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.data.access_token
       localStorage.setItem('access_token', token.value!)
       axios.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
-      // await fetchCurrentUser(); // 移除此处的调用，交由 App.vue 处理
+      await fetchCurrentUser(); // 登录成功后立即获取用户信息
       message.success('登录成功！')
       return true
     } catch (error: unknown) {

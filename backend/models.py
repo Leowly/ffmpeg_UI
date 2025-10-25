@@ -38,4 +38,8 @@ class ProcessingTask(Base):
     details = Column(Text, nullable=True) # 用于存储日志或错误信息
     owner_id = Column(Integer, ForeignKey("users.id"))
 
+    # 新增：与结果文件的关联
+    result_file_id = Column(Integer, ForeignKey("files.id"), nullable=True)
+    result_file = relationship("File")
+
     owner = relationship("User", back_populates="tasks")

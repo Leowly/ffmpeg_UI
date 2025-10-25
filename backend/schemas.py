@@ -69,6 +69,8 @@ class Task(TaskBase):
     details: str | None
     owner_id: int
     progress: int
+    result_file_id: int | None = None # 新增：用于直接关联结果文件的ID
+    result_file: Optional['File'] = None # 新增：用于携带完整的文件对象
 
     class Config:
         from_attributes = True
