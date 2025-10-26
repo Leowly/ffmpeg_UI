@@ -421,9 +421,9 @@ export const useFileStore = defineStore('file', () => {
             })
             loadingMessage()
             message.success(`文件 "${filename}" 已保存到“下载”文件夹。`)
-          } catch (e) {
+          } catch (_e) {
             loadingMessage()
-            console.error('Unable to save file', e)
+            console.error('Unable to save file', _e)
             message.error('文件保存失败。请检查应用权限。')
           }
         }
@@ -452,6 +452,7 @@ export const useFileStore = defineStore('file', () => {
             const errorJson = JSON.parse(errorText)
             errorMessage = errorJson.detail || '无法解析错误详情'
           } catch (e) {
+            console.error('Unable to save file', e)
             errorMessage = error.message || '发生未知网络错误'
           }
         }
