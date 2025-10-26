@@ -420,7 +420,7 @@ export const useFileStore = defineStore('file', () => {
               directory: Directory.Documents, // 保存到文档目录
             })
             loadingMessage()
-            message.success(`文件 "${filename}" 已保存到“下载”文件夹。`)
+            message.success(`文件 "${filename}" 已保存到“文档”文件夹。`)
           } catch (_e) {
             loadingMessage()
             console.error('Unable to save file', _e)
