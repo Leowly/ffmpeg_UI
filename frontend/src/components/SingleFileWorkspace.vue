@@ -29,7 +29,7 @@
       <a-descriptions bordered :column="descriptionColumns">
         <!-- 1. 通用信息 -->
         <a-descriptions-item label="容器格式" :span="descriptionColumns >= 2 ? 2 : 1">{{
-          fileStore.fileInfo.format.format_long_name
+          normalizedContainerFormat
         }}</a-descriptions-item>
         <a-descriptions-item label="时长"
           >{{ parseFloat(fileStore.fileInfo.format.duration).toFixed(2) }} 秒</a-descriptions-item
@@ -190,6 +190,38 @@ const mediaTypeDisplay = computed(() => {
   if (mediaType.value === 'video') return '视频文件'
   if (mediaType.value === 'audio') return '音频文件'
   return '媒体文件'
+})
+
+const normalizedContainerFormat = computed(() => {
+  if (!fileStore.fileInfo) return 'Unknown'
+  
+  const formatName = fileStore.fileInfo.format.format_name
+  const formatLongName = fileStore.fileInfo.format.format_long_name
+  
+  // If format_name contains 'mp4' but format_long_name shows QuickTime/MOV, 
+  // it's still an MP4 file, just with a different internal structure
+  if (formatName.includes('mp4')) {
+    return 'MPEG-4 (mp4)'
+  } else if (formatName.includes('mov')) {
+    return 'QuickTime MOV'
+  } else if (formatName.includes('mkv')) {
+    return 'Matroska (mkv)'
+  } else if (formatName.includes('avi')) {
+    return 'Audio Video Interleave (avi)'
+  } else if (formatName.includes('flv')) {
+    return 'Flash Video (flv)'
+  } else if (formatName.includes('webm')) {
+    return 'WebM (webm)'
+  } else if (formatName.includes('mp3')) {
+    return 'MPEG Audio Layer 3 (mp3)'
+  } else if (formatName.includes('wav')) {
+    return 'Waveform Audio (wav)'
+  } else if (formatName.includes('flac')) {
+    return 'Free Lossless Audio Codec (flac)'
+  } else {
+    // Fallback to the original format_long_name if format not recognized
+    return formatLongName
+  }
 })
 
 const audioBitrate = computed(() => {

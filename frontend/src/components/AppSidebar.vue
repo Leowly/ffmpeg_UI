@@ -34,9 +34,8 @@
             class="task-list-container"
           >
             <template #renderItem="{ item: task }">
-              <a-list-item class="task-item">
+              <a-list-item class="task-item" @click="$emit('task-selected', task.id)">
                 <template #actions>
-                  <!-- 删除按钮，仅对已完成或失败的任务显示 -->
                   <a-popconfirm
                     v-if="['completed', 'failed'].includes(task.status)"
                     title="确定要清除这个任务记录吗？"
@@ -49,8 +48,8 @@
                 </template>
                 <a-list-item-meta :description="getTaskDescription(task)">
                   <template #title>
-                    <a-tooltip :title="getTaskDescription(task)" placement="topLeft">
-                      <span class="task-title" @click="$emit('task-selected', task.id)"
+                    <a-tooltip>
+                      <span class="task-title"
                         >任务 #{{ task.id }}</span
                       >
                     </a-tooltip>

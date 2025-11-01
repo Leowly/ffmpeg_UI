@@ -26,8 +26,25 @@ export const API_ENDPOINTS = {
   FILE_INFO: (fileId: string) => `${BASE_URL}/api/file-info?filename=${fileId}`,
   PROCESS_FILE: `${BASE_URL}/api/process`,
   TASK_LIST: `${BASE_URL}/api/tasks`,
-  TASK_PROGRESS: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}/progress`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
   DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
-  DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`, // 示例，可能需要实现
+  DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`,
+  WS_PROGRESS: (taskId: number) => {
+    // 从BASE_URL解析主机和协议，构建WebSocket URL
+    let wsProtocol = 'ws://';
+    let wsHost = BASE_URL;
+    
+    if (BASE_URL.startsWith('https://')) {
+      wsProtocol = 'wss://';
+      wsHost = BASE_URL.substring(8); // 移除 'https://' 前缀
+    } else if (BASE_URL.startsWith('http://')) {
+      wsProtocol = 'ws://';
+      wsHost = BASE_URL.substring(7); // 移除 'http://' 前缀
+    } else {
+      // 如果BASE_URL没有协议前缀，假定为http
+      wsHost = BASE_URL;
+    }
+    
+    return `${wsProtocol}${wsHost}/ws/progress/${taskId}`;
+  },
 }

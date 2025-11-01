@@ -45,15 +45,26 @@ def update_file_status(db: Session, file_id: int, new_status: str):
     return db_file
 
 def delete_file(db: Session, file_id: int):
-    # 首先，找到所有引用该文件的任务，并将它们的 result_file_id 设置为 None
+    # 获取要删除的文件信息，以便知道其文件名
+    db_file = db.query(models.File).filter(models.File.id == file_id).first()
+    if not db_file:
+        return None
+    
+    # 找到所有引用该文件作为结果文件的任务并删除它们
+    # 这些是处理该文件后生成的输出文件
     db.query(models.ProcessingTask).filter(
         models.ProcessingTask.result_file_id == file_id
-    ).update({"result_file_id": None}, synchronize_session=False)
+    ).delete(synchronize_session=False)
 
-    db_file = db.query(models.File).filter(models.File.id == file_id).first()
-    if db_file:
-        db.delete(db_file)
-        db.commit()
+    # 找到所有使用该文件作为输入的任务并删除它们
+    # 通过检查source_filename字段匹配文件名
+    db.query(models.ProcessingTask).filter(
+        models.ProcessingTask.source_filename == db_file.filename
+    ).delete(synchronize_session=False)
+
+    # 删除文件本身
+    db.delete(db_file)
+    db.commit()
     return db_file
 
 # --- Task CRUD Operations ---

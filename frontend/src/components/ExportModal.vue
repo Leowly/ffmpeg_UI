@@ -137,8 +137,33 @@ watch(previewFileInfo, (fileInfo) => {
     modalEndTime.value = props.initialEndTime
   }
 
-  const format = fileInfo.format?.format_name.split(',')[0]
-  formState.container = format || 'mp4'
+  // Normalize the format to handle cases where MP4 files are identified as QuickTime/MOV
+  const formatName = fileInfo.format?.format_name // Don't split here, we need the full format string
+  let normalizedFormat = 'mp4' // default fallback
+  
+  // Apply the same normalization as in SingleFileWorkspace
+  // Check the full format_name string to detect what formats are supported
+  if (formatName && formatName.includes('mp4')) {
+    normalizedFormat = 'mp4'
+  } else if (formatName && formatName.includes('mov')) {
+    normalizedFormat = 'mov'
+  } else if (formatName && formatName.includes('mkv')) {
+    normalizedFormat = 'mkv'
+  } else if (formatName && formatName.includes('avi')) {
+    normalizedFormat = 'avi'
+  } else if (formatName && formatName.includes('flv')) {
+    normalizedFormat = 'flv'
+  } else if (formatName && formatName.includes('webm')) {
+    normalizedFormat = 'webm'
+  } else if (formatName && formatName.includes('mp3')) {
+    normalizedFormat = 'mp3'
+  } else if (formatName && formatName.includes('wav')) {
+    normalizedFormat = 'wav'
+  } else if (formatName && formatName.includes('flac')) {
+    normalizedFormat = 'flac'
+  }
+  
+  formState.container = normalizedFormat
   formState.videoCodec = 'copy'
   formState.audioCodec = 'copy'
 
@@ -333,12 +358,12 @@ const handleCancel = () => {
         <div v-if="previewFileInfo">
           <a-form-item label="容器格式">
             <a-select v-model:value="formState.container">
-              <a-select-option value="mp4">MP4</a-select-option>
-              <a-select-option value="mkv">MKV</a-select-option>
-              <a-select-option value="mov">MOV</a-select-option>
-              <a-select-option value="mp3">MP3</a-select-option>
-              <a-select-option value="flac">FLAC</a-select-option>
-              <a-select-option value="wav">WAV</a-select-option>
+              <a-select-option value="mp4">MPEG-4 (mp4)</a-select-option>
+              <a-select-option value="mkv">Matroska (mkv)</a-select-option>
+              <a-select-option value="mov">QuickTime MOV (mov)</a-select-option>
+              <a-select-option value="mp3">MPEG Audio Layer 3 (mp3)</a-select-option>
+              <a-select-option value="flac">Free Lossless Audio Codec (flac)</a-select-option>
+              <a-select-option value="wav">Waveform Audio (wav)</a-select-option>
             </a-select>
           </a-form-item>
 

@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import AppSidebar from './components/AppSidebar.vue'
 import SingleFileWorkspace from './components/SingleFileWorkspace.vue'
 import AuthForm from './components/AuthForm.vue'
@@ -9,7 +9,6 @@ import ExportModal from './components/ExportModal.vue'
 import TaskDetails from './components/TaskDetails.vue'
 import { useAuthStore } from './stores/authStore'
 import { useFileStore } from './stores/fileStore'
-import { ExportOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 
 const authStore = useAuthStore()
@@ -17,6 +16,9 @@ const fileStore = useFileStore()
 
 const isExportModalVisible = ref(false)
 const selectedTaskId = ref<number | null>(null) // 当前选中的任务ID
+
+// 任务刷新定时器
+let taskRefreshInterval: number | null = null
 
 // 更新后的导出点击逻辑
 const handleExportClick = () => {
@@ -38,6 +40,27 @@ const selectTask = (taskId: number) => {
   selectedTaskId.value = taskId
 }
 
+// 启动定时刷新任务列表
+const startTaskRefresh = () => {
+  if (taskRefreshInterval) {
+    clearInterval(taskRefreshInterval)
+  }
+  taskRefreshInterval = window.setInterval(() => {
+    if (fileStore.hasActiveTasks) {
+      fileStore.fetchTaskList()
+    } else {
+      // 如果没有活动任务，停止定时器以减少不必要的请求
+      stopTaskRefresh()
+    }
+  }, 5000) // 每5秒刷新一次，仅当有活动任务时
+}
+
+const stopTaskRefresh = () => {
+  if (taskRefreshInterval) {
+    clearInterval(taskRefreshInterval)
+    taskRefreshInterval = null
+  }
+}
 
 onMounted(async () => {
   // 应用启动时的核心逻辑：
@@ -49,7 +72,14 @@ onMounted(async () => {
     // 3. 如果用户信息成功获取，则初始化文件和任务列表
     if (authStore.user) {
       fileStore.initializeStore()
+      startTaskRefresh()
     }
+  }
+})
+
+onUnmounted(() => {
+  if (taskRefreshInterval) {
+    clearInterval(taskRefreshInterval)
   }
 })
 </script>
@@ -73,7 +103,6 @@ onMounted(async () => {
     <div class="bottom-toolbar">
       <UserInfo />
       <a-button type="primary" shape="round" size="large" @click="handleExportClick">
-        <template #icon><ExportOutlined /></template>
         导出文件
       </a-button>
     </div>

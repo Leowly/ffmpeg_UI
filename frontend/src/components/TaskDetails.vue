@@ -33,7 +33,7 @@
           />
           <span v-else>{{ getProgress(task) }}%</span>
         </a-descriptions-item>
-        <a-descriptions-item label="命令" :span="2">
+        <a-descriptions-item label="命令" :span="descriptionColumns">
           <div class="command-preview">
             <code>{{ task.ffmpeg_command }}</code>
             <a-tooltip title="复制命令">
@@ -44,7 +44,7 @@
         <a-descriptions-item
           v-if="task.details && task.details.length > 0"
           label="详细信息"
-          :span="2"
+          :span="descriptionColumns"
         >
           <div class="details-content">
             <pre class="details-text">{{ task.details }}</pre>
@@ -74,12 +74,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useFileStore, type Task } from '@/stores/fileStore'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons-vue'
-import axios from 'axios'
-import { API_ENDPOINTS } from '@/api'
 
 // 接收任务作为 prop
 const props = defineProps<{
@@ -91,83 +89,6 @@ const emit = defineEmits(['close'])
 
 // 文件store实例
 const fileStore = useFileStore()
-
-// --- 实时进度轮询 ---
-const progressPoller = ref<number | null>(null)
-
-const fetchProgress = async () => {
-  if (props.task.status !== 'processing') {
-    stopProgressPolling()
-    return
-  }
-  try {
-    const response = await axios.get<{ progress: number }>(
-      API_ENDPOINTS.TASK_PROGRESS(props.task.id)
-    )
-
-    const progress = response.data.progress
-
-    // 总是先更新进度，让UI即时反应
-    fileStore.updateTaskProgress(props.task.id, progress)
-
-    // 处理失败信号
-    if (progress === -1) {
-      stopProgressPolling() // 停止当前轮询
-      // 强制刷新整个任务列表以获取最新的“failed”状态和其他详情
-      await fileStore.fetchTaskList()
-      return
-    }
-
-    // 处理完成信号
-    if (progress >= 100) {
-      stopProgressPolling()
-      // 添加一个短暂的延迟，以确保后端有足够的时间将任务状态完全更新为“completed”
-      setTimeout(() => {
-        fileStore.fetchTaskList()
-      }, 500)
-      return
-    }
-  } catch (error) {
-    console.error(`Failed to fetch progress for task ${props.task.id}:`, error)
-    // 如果接口404（可能任务已完成，缓存已清理），则停止轮询
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      stopProgressPolling()
-    }
-  }
-}
-
-const startProgressPolling = () => {
-  if (progressPoller.value) return // 避免重复启动
-  fileStore.pauseMainPolling() // 暂停主轮询
-  console.log(`[TaskDetails] Starting progress polling for task #${props.task.id}`)
-  progressPoller.value = window.setInterval(fetchProgress, 1000) // 每 1s 查询一次
-}
-
-const stopProgressPolling = () => {
-  if (progressPoller.value) {
-    console.log(`[TaskDetails] Stopping progress polling for task #${props.task.id}`)
-    clearInterval(progressPoller.value)
-    progressPoller.value = null
-    fileStore.resumeMainPolling() // 恢复主轮询
-  }
-}
-
-// 监视任务状态，自动启停轮询器
-watch(
-  () => props.task.status,
-  (newStatus, oldStatus) => {
-    if (newStatus === 'processing') {
-      startProgressPolling()
-    } else if (oldStatus === 'processing') {
-      stopProgressPolling()
-      // 当任务从处理中变为完成时，确保进度条达到100%
-      if (newStatus === 'completed') {
-        fileStore.updateTaskProgress(props.task.id, 100)
-      }
-    }
-  },
-  { immediate: true } // 立即执行一次，以便组件加载时就能启动轮询
-)
 
 // 响应式列数，根据屏幕宽度调整
 const descriptionColumns = ref(2)
@@ -195,14 +116,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  stopProgressPolling() // 组件卸载时确保停止轮询
-  fileStore.resumeMainPolling() // 同时确保主轮询已恢复
   if (observer) {
     observer.disconnect()
   }
 })
-
-// 文件store实例
 
 // 根据状态获取颜色
 const getStatusColor = (status: string) => {
@@ -248,8 +165,6 @@ const getProgress = (task: Task) => {
   return task.progress || 0
 }
 
-// 格式化日期
-
 // 复制命令到剪贴板
 const copyCommand = async () => {
   try {
@@ -261,31 +176,75 @@ const copyCommand = async () => {
 }
 
 // 复制错误详情到剪贴板
+
 const copyErrorDetails = async () => {
+
   try {
+
     await navigator.clipboard.writeText(props.task.details || '')
+
     message.success('错误信息已复制到剪贴板')
+
   } catch {
+
     message.error('复制错误信息失败')
+
   }
+
 }
+
+
 
 // 定位到处理后的文件
+
 const goToFile = () => {
+
   fileStore.selectFileByTask(props.task)
+
   emit('close') // 切换回工作区视图
+
 }
 
+
+
 // 定位到文件并下载
+
+
+
 const goToFileAndDownload = () => {
-  goToFile() // 这个函数会选中文件并触发视图切换
-  // 稍作延迟，以确保视图切换和文件选中状态更新完毕
-  setTimeout(() => {
-    if (fileStore.selectedFileId) {
-      fileStore.downloadFile(fileStore.selectedFileId)
-    }
-  }, 300)
+
+
+
+  const fileId = fileStore.selectFileByTask(props.task)
+
+
+
+  if (fileId) {
+
+
+
+    emit('close') // 切换回工作区视图
+
+
+
+    nextTick(() => {
+
+
+
+      fileStore.downloadFile(fileId)
+
+
+
+    })
+
+
+
+  }
+
+
+
 }
+
 </script>
 
 <style scoped>
