@@ -2,7 +2,6 @@ apply plugin: 'com.android.application'
 
 android {
     namespace "com.leowly.ffmpegui"
-    compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.leowly.ffmpegui"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -32,12 +31,16 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    //noinspection GradleDependency
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    //noinspection GradleDependency
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    //noinspection GradleDependency
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    //noinspection GradleDependency
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
@@ -49,6 +52,6 @@ try {
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
     }
-} catch(Exception e) {
+} catch(Exception ignored) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
