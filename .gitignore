@@ -1,3 +1,5 @@
 .env
 .gemini/
 gha-creds-*.json
+pack_sources.bat
+package.txt

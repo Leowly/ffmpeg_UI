@@ -5,7 +5,6 @@ import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
 import axios, { isAxiosError } from 'axios'
 
-// --- 类型定义 ---
 interface ProcessPayload {
   files: string[]
   container: string
@@ -19,7 +18,6 @@ interface ProcessPayload {
   audioBitrate?: number
 }
 
-// --- Props and Emits ---
 const props = defineProps<{
   visible: boolean
   initialStartTime: number
@@ -27,11 +25,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['update:visible'])
 
-// --- State ---
 const fileStore = useFileStore()
 const isProcessing = ref(false)
-
-// 本地状态，用于解耦
 const previewFileInfo = ref<FFProbeResult | null>(null)
 const isPreviewLoading = ref(false)
 const modalStartTime = ref(0)
@@ -48,7 +43,7 @@ const formState = reactive({
 })
 
 const originalValues = reactive({
-  videoCodec: 'libx264',
+  videoCodec: 'libx24',
   videoBitrate: 2000,
   width: 1920,
   height: 1080,
@@ -56,7 +51,70 @@ const originalValues = reactive({
   audioBitrate: 192,
 })
 
-// --- 核心逻辑：获取预览文件信息 ---
+// =================================================================
+// 核心升级逻辑：分析选择类型并动态调整UI
+// =================================================================
+
+const getFileType = (filename: string): 'video' | 'audio' | 'unknown' => {
+  if (filename.match(/\.(mp4|mov|mkv|avi|webm|flv)$/i)) return 'video'
+  if (filename.match(/\.(mp3|wav|flac|aac|ogg)$/i)) return 'audio'
+  return 'unknown'
+}
+
+const selectionMode = computed<'video' | 'audio' | 'mixed' | 'none'>(() => {
+  if (formState.selectedFiles.length === 0) return 'none'
+
+  let hasVideo = false
+  let hasAudio = false
+
+  for (const fileId of formState.selectedFiles) {
+    const file = fileStore.fileList.find((f) => f.id === fileId)
+    if (file) {
+      const type = getFileType(file.name)
+      if (type === 'video') hasVideo = true
+      if (type === 'audio') hasAudio = true
+    }
+  }
+
+  if (hasVideo && hasAudio) return 'mixed'
+  if (hasVideo) return 'video'
+  if (hasAudio) return 'audio'
+  return 'none'
+})
+
+const availableContainers = computed(() => {
+  if (selectionMode.value === 'video') {
+    return [
+      { value: 'mp4', label: 'MPEG-4 (mp4)' },
+      { value: 'mkv', label: 'Matroska (mkv)' },
+      { value: 'mov', label: 'QuickTime MOV (mov)' },
+      { value: 'webm', label: 'WebM for Web' },
+    ]
+  }
+  if (selectionMode.value === 'audio') {
+    return [
+      { value: 'mp3', label: 'MPEG Audio Layer 3 (mp3)' },
+      { value: 'flac', label: 'Free Lossless Audio Codec (flac)' },
+      { value: 'wav', label: 'Waveform Audio (wav)' },
+      { value: 'aac', label: 'Advanced Audio Coding (aac)' },
+    ]
+  }
+  return []
+})
+
+// 当选择模式改变时，自动设置一个合理的默认容器
+watch(selectionMode, (newMode) => {
+  if (newMode === 'video') {
+    formState.container = 'mp4'
+  } else if (newMode === 'audio') {
+    formState.container = 'mp3'
+  }
+})
+
+// =================================================================
+// 升级结束
+// =================================================================
+
 const getPreviewInfo = async (fileId: string) => {
   isPreviewLoading.value = true
   try {
@@ -70,7 +128,20 @@ const getPreviewInfo = async (fileId: string) => {
   }
 }
 
-// --- Helper & Watchers ---
+const handleVideoParamChange = () => {
+  if (formState.videoCodec === 'copy') {
+    formState.videoCodec = originalValues.videoCodec || 'libx264'
+    message.info('视频参数已更改，编码器已自动切换为重编码模式。')
+  }
+}
+
+const handleAudioParamChange = () => {
+  if (formState.audioCodec === 'copy') {
+    formState.audioCodec = originalValues.audioCodec || 'aac'
+    message.info('音频参数已更改，编码器已自动切换为重编码模式。')
+  }
+}
+
 const mapCodecNameToLib = (codecName: string, type: 'video' | 'audio'): string => {
   const videoMap: Record<string, string> = { h264: 'libx264', hevc: 'libx265', av1: 'libaom-av1' }
   const audioMap: Record<string, string> = { aac: 'aac', opus: 'opus', mp3: 'mp3' }
@@ -78,7 +149,6 @@ const mapCodecNameToLib = (codecName: string, type: 'video' | 'audio'): string =
   return audioMap[codecName] || 'aac'
 }
 
-// 模态框打开时，同步初始状态
 watch(
   () => props.visible,
   (isVisible) => {
@@ -93,14 +163,12 @@ watch(
         formState.selectedFiles = []
         previewFileInfo.value = null
       }
-      // 始终同步初始时间
       modalStartTime.value = props.initialStartTime
       modalEndTime.value = props.initialEndTime
     }
   },
 )
 
-// 监听模态框内部的文件选择变化
 watch(
   () => formState.selectedFiles,
   (newSelection, oldSelection) => {
@@ -116,7 +184,6 @@ watch(
   { deep: true },
 )
 
-// 监听获取的 previewFileInfo，用它来填充表单默认值和时间
 watch(previewFileInfo, (fileInfo) => {
   if (!fileInfo) {
     modalStartTime.value = 0
@@ -127,43 +194,15 @@ watch(previewFileInfo, (fileInfo) => {
   const duration = parseFloat(fileInfo.format.duration)
   const newFileId = formState.selectedFiles[0]
 
-  // 如果窗口内选择的文件和主工作区不一致，则重置时间为完整时长
   if (newFileId !== fileStore.selectedFileId) {
     modalStartTime.value = 0
     modalEndTime.value = isNaN(duration) ? 0 : duration
   } else {
-    // 如果一致，则使用从 props 传入的（可能被裁剪的）时间
     modalStartTime.value = props.initialStartTime
     modalEndTime.value = props.initialEndTime
   }
 
-  // Normalize the format to handle cases where MP4 files are identified as QuickTime/MOV
-  const formatName = fileInfo.format?.format_name // Don't split here, we need the full format string
-  let normalizedFormat = 'mp4' // default fallback
-  
-  // Apply the same normalization as in SingleFileWorkspace
-  // Check the full format_name string to detect what formats are supported
-  if (formatName && formatName.includes('mp4')) {
-    normalizedFormat = 'mp4'
-  } else if (formatName && formatName.includes('mov')) {
-    normalizedFormat = 'mov'
-  } else if (formatName && formatName.includes('mkv')) {
-    normalizedFormat = 'mkv'
-  } else if (formatName && formatName.includes('avi')) {
-    normalizedFormat = 'avi'
-  } else if (formatName && formatName.includes('flv')) {
-    normalizedFormat = 'flv'
-  } else if (formatName && formatName.includes('webm')) {
-    normalizedFormat = 'webm'
-  } else if (formatName && formatName.includes('mp3')) {
-    normalizedFormat = 'mp3'
-  } else if (formatName && formatName.includes('wav')) {
-    normalizedFormat = 'wav'
-  } else if (formatName && formatName.includes('flac')) {
-    normalizedFormat = 'flac'
-  }
-  
-  formState.container = normalizedFormat
+  // 默认容器的选择现在由 selectionMode 的 watch 控制，这里不再需要
   formState.videoCodec = 'copy'
   formState.audioCodec = 'copy'
 
@@ -186,7 +225,6 @@ watch(previewFileInfo, (fileInfo) => {
   }
 })
 
-// --- 智能预览 ---
 const previewFileName = computed<string | null>(() => {
   if (formState.selectedFiles.length === 0) return null
   const file = fileStore.fileList.find((f) => f.id === formState.selectedFiles[0])
@@ -197,7 +235,6 @@ const totalDuration = computed(() => {
   return previewFileInfo.value ? parseFloat(previewFileInfo.value.format.duration) : 0
 })
 
-// 复制预览命令到剪贴板（无提示）
 const copyPreview = async () => {
   const text = ffmpegCommandPreview.value || ''
   try {
@@ -205,7 +242,6 @@ const copyPreview = async () => {
       await navigator.clipboard.writeText(text)
       message.success('已复制')
     } else {
-      // 退回到 textarea 选择复制
       const ta = document.createElement('textarea')
       ta.value = text
       document.body.appendChild(ta)
@@ -215,19 +251,21 @@ const copyPreview = async () => {
       message.success('已复制')
     }
   } catch {
-    // 忽略错误，不显示提示
+    //
   }
 }
 
 const ffmpegCommandPreview = computed(() => {
   if (!previewFileInfo.value || !previewFileName.value) return '请选择文件以生成预览...'
+  if (selectionMode.value === 'mixed') return '不支持混合处理视频和音频文件。'
+
   let cmd = `ffmpeg -i "${previewFileName.value}"`
   if (modalStartTime.value > 0 || modalEndTime.value < totalDuration.value) {
     cmd += ` -ss ${modalStartTime.value.toFixed(3)} -to ${modalEndTime.value.toFixed(3)}`
   }
+
   const vs = previewFileInfo.value.streams?.find((s) => s.codec_type === 'video')
-  const isVideoContainer = ['mp4', 'mkv', 'mov'].includes(formState.container)
-  if (isVideoContainer && vs) {
+  if (selectionMode.value === 'video' && vs) {
     cmd += ` -c:v ${formState.videoCodec}`
     if (formState.videoCodec !== 'copy') {
       if (formState.videoBitrate !== originalValues.videoBitrate)
@@ -241,6 +279,7 @@ const ffmpegCommandPreview = computed(() => {
   } else {
     cmd += ` -vn`
   }
+
   const as = previewFileInfo.value.streams?.find((s) => s.codec_type === 'audio')
   if (as) {
     cmd += ` -c:a ${formState.audioCodec}`
@@ -250,18 +289,23 @@ const ffmpegCommandPreview = computed(() => {
   } else {
     cmd += ` -an`
   }
+
   const baseName = previewFileName.value.substring(0, previewFileName.value.lastIndexOf('.'))
   const outputFileName = `${baseName}_processed.${formState.container}`
   cmd += ` "${outputFileName}"`
   return cmd
 })
 
-// --- 后端交互 ---
 const handleOk = async () => {
   if (formState.selectedFiles.length === 0) {
     message.error('请至少选择一个要处理的文件！')
     return
   }
+  if (selectionMode.value === 'mixed') {
+    message.error('无法处理，请不要混合选择视频和音频文件。')
+    return
+  }
+
   isProcessing.value = true
   try {
     const payload: ProcessPayload = {
@@ -284,8 +328,9 @@ const handleOk = async () => {
     }
     if (formState.audioCodec !== 'copy' && formState.audioBitrate !== originalValues.audioBitrate)
       payload.audioBitrate = formState.audioBitrate
+
     const response = await axios.post<Task[]>(API_ENDPOINTS.PROCESS_FILE, payload)
-    fileStore.addTasks(response.data) // 将新创建的任务添加到 store
+    fileStore.addTasks(response.data)
     message.success(`成功创建 ${response.data.length} 个处理任务，已在后台开始执行。`)
     emit('update:visible', false)
   } catch (error: unknown) {
@@ -322,7 +367,13 @@ const handleCancel = () => {
         </div>
         <div class="footer-actions">
           <a-button key="back" @click="handleCancel">取消</a-button>
-          <a-button key="submit" type="primary" :loading="isProcessing" @click="handleOk">
+          <a-button
+            key="submit"
+            type="primary"
+            :loading="isProcessing"
+            :disabled="selectionMode === 'mixed' || selectionMode === 'none'"
+            @click="handleOk"
+          >
             开始处理 ({{ formState.selectedFiles.length }})
           </a-button>
         </div>
@@ -345,7 +396,15 @@ const handleCancel = () => {
         <a-alert v-else message="没有可用的文件" type="info" />
       </a-form-item>
 
-      <!-- 当没有文件信息时显示占位符 -->
+      <a-alert
+        v-if="selectionMode === 'mixed'"
+        message="检测到混合文件类型"
+        description="请仅选择视频文件或仅选择音频文件进行批量处理，不要混合选择。"
+        type="warning"
+        show-icon
+        style="margin-bottom: 16px"
+      />
+
       <div
         v-if="!previewFileInfo && formState.selectedFiles.length > 0"
         class="settings-placeholder"
@@ -353,21 +412,13 @@ const handleCancel = () => {
         <a-spin tip="正在加载文件信息以生成设置选项..."></a-spin>
       </div>
 
-      <!-- 当有文件信息时显示设置 -->
-      <fieldset :disabled="isPreviewLoading">
+      <fieldset :disabled="isPreviewLoading || selectionMode === 'mixed' || selectionMode === 'none'">
         <div v-if="previewFileInfo">
           <a-form-item label="容器格式">
-            <a-select v-model:value="formState.container">
-              <a-select-option value="mp4">MPEG-4 (mp4)</a-select-option>
-              <a-select-option value="mkv">Matroska (mkv)</a-select-option>
-              <a-select-option value="mov">QuickTime MOV (mov)</a-select-option>
-              <a-select-option value="mp3">MPEG Audio Layer 3 (mp3)</a-select-option>
-              <a-select-option value="flac">Free Lossless Audio Codec (flac)</a-select-option>
-              <a-select-option value="wav">Waveform Audio (wav)</a-select-option>
-            </a-select>
+            <a-select v-model:value="formState.container" :options="availableContainers" />
           </a-form-item>
 
-          <div v-if="previewFileInfo.streams?.find((s) => s.codec_type === 'video')">
+          <div v-if="selectionMode === 'video' && previewFileInfo.streams?.find((s) => s.codec_type === 'video')">
             <a-divider>视频设置</a-divider>
             <a-form-item label="视频编码">
               <a-select v-model:value="formState.videoCodec">
@@ -383,30 +434,35 @@ const handleCancel = () => {
                 v-model:value="formState.videoBitrate"
                 :min="100"
                 style="width: 100%"
+                @change="handleVideoParamChange"
               />
             </a-form-item>
 
             <a-form-item label="分辨率">
               <a-row :gutter="8">
-                <a-col :span="10"
-                  ><a-input-number
+                <a-col :span="10">
+                  <a-input-number
                     v-model:value="formState.resolution.width"
                     :min="1"
                     addon-after="宽"
                     style="width: 100%"
-                /></a-col>
-                <a-col :span="10"
-                  ><a-input-number
+                    @change="handleVideoParamChange"
+                  />
+                </a-col>
+                <a-col :span="10">
+                  <a-input-number
                     v-model:value="formState.resolution.height"
                     :min="1"
                     addon-after="高"
                     style="width: 100%"
-                /></a-col>
-                <a-col :span="4" style="display: flex; align-items: center"
-                  ><a-checkbox v-model:checked="formState.resolution.keepAspectRatio"
+                    @change="handleVideoParamChange"
+                  />
+                </a-col>
+                <a-col :span="4" style="display: flex; align-items: center">
+                  <a-checkbox v-model:checked="formState.resolution.keepAspectRatio"
                     >锁定比例</a-checkbox
-                  ></a-col
-                >
+                  >
+                </a-col>
               </a-row>
             </a-form-item>
           </div>
@@ -427,6 +483,7 @@ const handleCancel = () => {
                 v-model:value="formState.audioBitrate"
                 :min="32"
                 style="width: 100%"
+                @change="handleAudioParamChange"
               />
             </a-form-item>
           </div>
@@ -457,7 +514,7 @@ const handleCancel = () => {
 }
 .footer-actions {
   display: flex;
-  gap: 8px; /* 默认按钮间距 */
+  gap: 8px;
 }
 .ffmpeg-command-preview code {
   font-size: 12px;

@@ -45,14 +45,15 @@ const startTaskRefresh = () => {
   if (taskRefreshInterval) {
     clearInterval(taskRefreshInterval)
   }
+  // 将其视为健康检查，可以将间隔延长，例如10秒
   taskRefreshInterval = window.setInterval(() => {
     if (fileStore.hasActiveTasks) {
-      fileStore.fetchTaskList()
+      fileStore.checkAndReconnectWebSockets();
+
     } else {
-      // 如果没有活动任务，停止定时器以减少不必要的请求
       stopTaskRefresh()
     }
-  }, 5000) // 每5秒刷新一次，仅当有活动任务时
+  }, 10000) // 每10秒检查一次连接健康
 }
 
 const stopTaskRefresh = () => {

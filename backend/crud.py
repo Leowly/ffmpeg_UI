@@ -1,7 +1,7 @@
 # crud.py - Database Create, Read, Update, Delete operations
 from typing import cast
 from sqlalchemy.orm import Session
-
+import os
 from . import models, schemas
 from .security import get_password_hash
 
@@ -44,25 +44,35 @@ def update_file_status(db: Session, file_id: int, new_status: str):
         db.refresh(db_file)
     return db_file
 
-def delete_file(db: Session, file_id: int):
-    # 获取要删除的文件信息，以便知道其文件名
+def delete_file(db: Session, file_id: int, file_path: str | None = None):
+    # 获取要删除的文件信息
     db_file = db.query(models.File).filter(models.File.id == file_id).first()
     if not db_file:
         return None
-    
+
+    # --- 新增的逻辑：先删除物理文件 ---
+    # 优先使用从 API 层传入的、经过解析的真实路径
+    path_to_delete = file_path or db_file.filepath
+    if os.path.exists(path_to_delete):
+        try:
+            os.remove(path_to_delete)
+        except OSError as e:
+            # 如果文件删除失败，可以选择记录日志并中断操作，避免删除数据库记录
+            # 这里为了简单起见，我们继续执行，但生产环境中应处理此异常
+            print(f"Error deleting file {path_to_delete}: {e}")
+            # raise  # 或者直接抛出异常，让整个事务回滚
+
     # 找到所有引用该文件作为结果文件的任务并删除它们
-    # 这些是处理该文件后生成的输出文件
     db.query(models.ProcessingTask).filter(
         models.ProcessingTask.result_file_id == file_id
     ).delete(synchronize_session=False)
 
     # 找到所有使用该文件作为输入的任务并删除它们
-    # 通过检查source_filename字段匹配文件名
     db.query(models.ProcessingTask).filter(
         models.ProcessingTask.source_filename == db_file.filename
     ).delete(synchronize_session=False)
 
-    # 删除文件本身
+    # 最后删除文件本身的数据库记录
     db.delete(db_file)
     db.commit()
     return db_file

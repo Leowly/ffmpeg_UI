@@ -1,3 +1,5 @@
+// src/stores/fileStore.ts
+
 import { defineStore } from 'pinia'
 import { ref, type Ref, computed, onUnmounted } from 'vue'
 import axios, { isAxiosError } from 'axios'
@@ -96,11 +98,11 @@ export const useFileStore = defineStore('file', () => {
   async function fetchTaskList() {
     try {
       const response = await axios.get<Task[]>(API_ENDPOINTS.TASK_LIST)
-      const oldTaskIds = new Set(taskList.value.map(task => task.id));
+      const oldTaskIds = new Set(taskList.value.map((task) => task.id))
       taskList.value = response.data
-      
-      // After fetching tasks, connect to any active tasks that weren't previously connected
-      response.data.forEach(task => {
+
+      // 获取任务列表后，为所有新的、活跃的任务建立 WebSocket 连接
+      response.data.forEach((task) => {
         if (['pending', 'processing'].includes(task.status) && !oldTaskIds.has(task.id)) {
           connectToTask(task.id)
         }
@@ -111,7 +113,9 @@ export const useFileStore = defineStore('file', () => {
   }
 
   function connectToTask(taskId: number) {
-    if (wsConnections.value.has(taskId)) {
+    // 如果已有健康的连接，则不重复连接
+    const existingWs = wsConnections.value.get(taskId)
+    if (existingWs && existingWs.readyState === WebSocket.OPEN) {
       return
     }
 
@@ -137,6 +141,21 @@ export const useFileStore = defineStore('file', () => {
       console.error(`WebSocket error for task ${taskId}:`, error)
       wsConnections.value.delete(taskId)
     }
+  }
+
+  // 新增 Action: 检查并修复 WebSocket 连接
+  function checkAndReconnectWebSockets() {
+    // 遍历当前 store 中所有处于活动状态的任务
+    taskList.value.forEach((task) => {
+      if (['pending', 'processing'].includes(task.status)) {
+        const ws = wsConnections.value.get(task.id)
+        // 如果连接不存在，或者已关闭，则尝试重新连接
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          console.warn(`WebSocket for active task #${task.id} is missing or closed. Reconnecting...`)
+          connectToTask(task.id)
+        }
+      }
+    })
   }
 
   async function fetchFileInfo(fileId: string) {
@@ -208,10 +227,9 @@ export const useFileStore = defineStore('file', () => {
         task.status = status
         wsConnections.value.get(taskId)?.close()
         if (status === 'completed' || status === 'failed') {
-          setTimeout(() => {
-            fetchTaskList()
-            fetchFileList()
-          }, 500)
+          // 移除延迟，实现更即时的UI反馈
+          fetchTaskList()
+          fetchFileList()
         }
       }
     }
@@ -283,7 +301,7 @@ export const useFileStore = defineStore('file', () => {
 
     try {
       const response = await axios.get(downloadUrl, {
-        responseType: 'blob'
+        responseType: 'blob',
       })
 
       const contentDisposition = response.headers['content-disposition']
@@ -342,8 +360,7 @@ export const useFileStore = defineStore('file', () => {
             errorMessage = error.message || 'An unknown network error occurred'
           }
         }
-      }
-      else if (error instanceof Error) {
+      } else if (error instanceof Error) {
         errorMessage = error.message
       }
       message.error(errorMessage)
@@ -352,7 +369,7 @@ export const useFileStore = defineStore('file', () => {
   }
 
   onUnmounted(() => {
-    wsConnections.value.forEach(ws => ws.close())
+    wsConnections.value.forEach((ws) => ws.close())
   })
 
   // --- Return exposed state, getters, and actions ---
@@ -380,5 +397,6 @@ export const useFileStore = defineStore('file', () => {
     initializeStore,
     updateTaskProgress,
     downloadFile,
+    checkAndReconnectWebSockets,
   }
 })

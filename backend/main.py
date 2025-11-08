@@ -25,10 +25,15 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import aiofiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from . import crud, models, schemas, security
 from .database import SessionLocal, engine
+
+# 在应用启动初期加载环境变量
+load_dotenv()
 
 # --- WebSocket Connection Manager ---
 class ConnectionManager:
@@ -84,15 +89,19 @@ app = FastAPI(
 )
 
 # --- CORS Configuration ---
-origins = [
-    "http://localhost", 
-    "http://localhost:5173",
-    "https://ffmpeg.0426233.xyz",
-    "https://*.capacitor.localhost",
-    "capacitor://localhost",
-    "ionic://localhost",
-    "https://localhost"
-]
+cors_origins_str = os.getenv("CORS_ORIGINS", "")
+origins = [origin.strip() for origin in cors_origins_str.split(',') if origin]
+
+if not origins:
+    origins = [
+        "http://localhost", 
+        "http://localhost:5173",
+        "https://ffmpeg.0426233.xyz",
+        "https://*.capacitor.localhost",
+        "capacitor://localhost",
+        "ionic://localhost",
+        "https://localhost"
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -179,13 +188,11 @@ def run_ffmpeg_blocking(
                             
                             if progress >= last_progress + 10 or time.time() - last_update_time >= 3:
                                 if progress < 100:
-                                    # Update WebSocket
                                     future = asyncio.run_coroutine_threadsafe(
                                         manager.send_progress(task_id, progress), main_loop
                                     )
                                     future.result()
 
-                                    # Update database
                                     db = SessionLocal()
                                     try:
                                         crud.update_task(db, task_id=task_id, progress=progress)
@@ -284,21 +291,20 @@ async def run_ffmpeg_process(
                     progress=100,
                     result_file_id=new_db_file.id if new_db_file else None
                 )
-                # Send final progress update and status update
-                await manager.send_progress(task_id, 100, "completed") # Final progress update
+                await manager.send_progress(task_id, 100, "completed")
                 logger.info(f"Task {task_id} post-processing finished.")
 
             except Exception as e:
                 error_msg = f"Post-processing failed: {e!r}"
                 logger.error(error_msg, exc_info=True)
                 crud.update_task(db, task_id=task_id, status="failed", details=error_msg)
-                await manager.send_progress(task_id, 100, "failed") # Indicate processing is done even if failed
+                await manager.send_progress(task_id, 100, "failed")
                 if os.path.exists(temp_output_path):
                     os.remove(temp_output_path)
         else:
             logger.error(f"Task {task_id} failed. Stderr: {full_stderr}")
             crud.update_task(db, task_id=task_id, status="failed", details=full_stderr)
-            await manager.send_progress(task_id, 100, "failed") # Indicate processing is done
+            await manager.send_progress(task_id, 100, "failed")
             if os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
 
@@ -340,22 +346,53 @@ async def websocket_endpoint(websocket: WebSocket, task_id: int):
     await manager.connect(websocket, task_id)
     try:
         while True:
-            await websocket.receive_text() # Keep connection open
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(task_id)
 
 # --- API Endpoints ---
-@app.post("/token", response_model=schemas.Token, tags=["Users"])
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = crud.get_user_by_username(db, username=form_data.username)
-    if not user or not security.verify_password(form_data.password, cast(str, user.hashed_password)):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+@app.post("/token", tags=["Users"])
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(), 
+    db: Session = Depends(get_db)
+):
+    try:
+        user = crud.get_user_by_username(db, username=form_data.username)
+        if not user or not security.verify_password(form_data.password, cast(str, user.hashed_password)):
+            error_response = schemas.APIResponse(
+                success=False, 
+                message="用户名或密码不正确。"
+            )
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content=error_response.model_dump()
+            )
+
+        # 核心修复：手动构建成功响应并用 JSONResponse 返回
+        access_token = security.create_access_token(data={"sub": user.username})
+        token_data = schemas.Token(access_token=access_token, token_type="bearer")
+        success_response = schemas.APIResponse[schemas.Token](
+            success=True,
+            data=token_data,
+            message="登录成功！"
         )
-    access_token = security.create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=success_response.model_dump()
+        )
+
+    except SQLAlchemyError:
+        error_response = schemas.APIResponse(success=False, message="数据库连接失败，请稍后再试。")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=error_response.model_dump()
+        )
+    except Exception:
+        error_response = schemas.APIResponse(success=False, message="服务器发生未知错误。")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=error_response.model_dump()
+        )
 
 @app.post("/users/", response_model=schemas.User, tags=["Users"])
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -368,7 +405,7 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
-@app.get("/api/file-info", tags=["Files"])
+@app.get("/api/file-info", response_model=schemas.FileInfoResponse, tags=["Files"])
 async def get_file_info(
     filename: str,
     current_user: models.User = Depends(get_current_user),
@@ -398,12 +435,8 @@ async def get_file_info(
         ]
         try:
             result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                errors='ignore',
-                check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                command, capture_output=True, text=True, errors='ignore',
+                check=False, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             return result.returncode, result.stdout, result.stderr
         except FileNotFoundError:
@@ -419,8 +452,10 @@ async def get_file_info(
             raise HTTPException(status_code=500, detail=f"ffprobe error: {stderr}")
 
         try:
-            return json.loads(stdout)
-        except json.JSONDecodeError:
+            raw_data = json.loads(stdout)
+            clean_data = schemas.FileInfoResponse.model_validate(raw_data)
+            return clean_data
+        except (json.JSONDecodeError, Exception):
             raise HTTPException(status_code=500, detail="Could not parse ffprobe output")
 
     except FileNotFoundError:
@@ -651,21 +686,16 @@ def delete_task(
     
     return
 
-@app.get("/api/task-status/{taskId}", tags=["Files"])
+@app.get("/api/task-status/{taskId}", response_model=schemas.Task, tags=["Tasks"])
 def get_task_status(
-    taskId: str,
+    taskId: int,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    try:
-        file_id = int(taskId)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid task ID")
-
-    db_file = crud.get_file_by_id(db, file_id=file_id)
-    if not db_file or db_file.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="File not found")
-    return {"status": db_file.status}
+    db_task = crud.get_task(db, task_id=taskId)
+    if not db_task or db_task.owner_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return db_task
 
 @app.delete("/api/delete-file", tags=["Files"])
 async def delete_user_file(
@@ -688,8 +718,7 @@ async def delete_user_file(
     if resolved:
         file_path = resolved
 
-    exists = await loop.run_in_executor(None, os.path.exists, file_path)
-    if exists:
+    if os.path.exists(file_path):
         await loop.run_in_executor(None, os.remove, file_path)
 
     await loop.run_in_executor(None, crud.delete_file, db, file_id)
