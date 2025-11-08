@@ -2,6 +2,7 @@
 import os
 import sys
 import asyncio
+import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,14 +12,12 @@ from slowapi.errors import RateLimitExceeded
 from .database import engine
 from . import models
 from .routers import users, files, tasks
-from .processing import manager
+from .processing import manager, worker
 from .config import UPLOAD_DIRECTORY
 from .limiter import limiter, _rate_limit_exceeded_handler
 
-# 在应用启动初期加载环境变量
 load_dotenv()
 
-# --- App Initialization ---
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -30,14 +29,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# 附加 limiter 状态并添加异常处理器
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# --- Global Configurations ---
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
-# --- CORS Middleware ---
 cors_origins_str = os.getenv("CORS_ORIGINS", "")
 origins = [origin.strip() for origin in cors_origins_str.split(',') if origin]
 if not origins:
@@ -53,11 +49,17 @@ app.add_middleware(
 )
 
 # --- Include Routers ---
-app.include_router(users.router)
-app.include_router(files.router)
-app.include_router(tasks.router)
+# 核心修复：在这里添加 prefix="/api"
+app.include_router(users.router) # 用户路由通常在根路径，如 /token, /users/
+app.include_router(files.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
 
-# --- WebSocket Endpoint ---
+@app.on_event("startup")
+async def startup_event():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    asyncio.create_task(worker())
+    print(">>> Background worker started.")
+
 @app.websocket("/ws/progress/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: int):
     await manager.connect(websocket, task_id)
@@ -67,7 +69,6 @@ async def websocket_endpoint(websocket: WebSocket, task_id: int):
     except WebSocketDisconnect:
         manager.disconnect(task_id)
 
-# --- Root Endpoint ---
 @app.get("/", tags=["Root"])
 def read_root():
     return {"message": "Welcome to the FFmpeg UI Backend"}

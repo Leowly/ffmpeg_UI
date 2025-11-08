@@ -16,11 +16,10 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
-from ..processing import manager, run_ffmpeg_process
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path
+from ..processing import manager, run_ffmpeg_process, task_queue 
+from ..config import UPLOAD_DIRECTORY, reconstruct_file_path 
 
 router = APIRouter(
-    prefix="/api",
     tags=["Files"],
 )
 
@@ -241,7 +240,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
 @router.post("/process", response_model=List[schemas.Task])
 async def process_files(
     payload: schemas.ProcessPayload,
-    background_tasks: BackgroundTasks,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -274,19 +272,18 @@ async def process_files(
         )
         db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=final_output_path)
 
-        background_tasks.add_task(
-            run_ffmpeg_process, 
-            db_task.id, 
-            command, 
-            payload.totalDuration,
-            manager,
-            display_command=ffmpeg_command_str, 
-            temp_output_path=temp_output_path,
-            final_output_path=final_output_path,
-            final_display_name=final_display_name,
-        )
+        task_details = {
+            "task_id": db_task.id,
+            "command_args": command,
+            "total_duration": payload.totalDuration,
+            "conn_manager": manager,
+            "display_command": ffmpeg_command_str,
+            "temp_output_path": temp_output_path,
+            "final_output_path": final_output_path,
+            "final_display_name": final_display_name,
+        }
+        await task_queue.put(task_details)
         
-        # 移除错误的乐观更新，API应该返回数据库的真实状态
         created_tasks.append(db_task)
 
     if not created_tasks:

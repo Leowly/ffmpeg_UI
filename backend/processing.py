@@ -16,6 +16,37 @@ from fastapi import WebSocket
 from . import crud, schemas
 from .database import SessionLocal
 
+task_queue = asyncio.Queue()
+
+async def worker():
+    """
+    一个永续运行的后台工作者，从队列中一次取出一个任务并执行。
+    """
+    while True:
+        # 从队列中等待并获取下一个任务
+        task_details = await task_queue.get()
+        
+        print(f"Worker picked up task: {task_details['task_id']}")
+        
+        # 使用 'try...except' 确保即使一个任务失败，工作者也不会崩溃
+        try:
+            # 调用我们现有的处理函数来执行任务
+            await run_ffmpeg_process(
+                task_id=task_details['task_id'],
+                command_args=task_details['command_args'],
+                total_duration=task_details['total_duration'],
+                conn_manager=task_details['conn_manager'],
+                display_command=task_details['display_command'],
+                temp_output_path=task_details['temp_output_path'],
+                final_output_path=task_details['final_output_path'],
+                final_display_name=task_details['final_display_name'],
+            )
+        except Exception as e:
+            print(f"An error occurred while processing task {task_details['task_id']}: {e}")
+        
+        # 标记任务完成，以便队列可以继续处理
+        task_queue.task_done()
+
 # --- WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):

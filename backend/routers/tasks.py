@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
 
+# 核心修复：移除 prefix="/api"
 router = APIRouter(
-    prefix="/api",
     tags=["Tasks"],
 )
 
