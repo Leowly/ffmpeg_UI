@@ -43,7 +43,7 @@ const formState = reactive({
 })
 
 const originalValues = reactive({
-  videoCodec: 'libx24',
+  videoCodec: 'libx264',
   videoBitrate: 2000,
   width: 1920,
   height: 1080,
@@ -51,9 +51,31 @@ const originalValues = reactive({
   audioBitrate: 192,
 })
 
-// =================================================================
-// 核心升级逻辑：分析选择类型并动态调整UI
-// =================================================================
+const handleWidthChange = (newWidth: number | null) => {
+  if (
+    formState.resolution.keepAspectRatio &&
+    originalValues.width > 0 &&
+    typeof newWidth === 'number'
+  ) {
+    const ratio = originalValues.height / originalValues.width
+    formState.resolution.height = Math.round(newWidth * ratio)
+  }
+  // 触发编码器切换检查
+  handleVideoParamChange()
+}
+
+const handleHeightChange = (newHeight: number | null) => {
+  if (
+    formState.resolution.keepAspectRatio &&
+    originalValues.height > 0 &&
+    typeof newHeight === 'number'
+  ) {
+    const ratio = originalValues.width / originalValues.height
+    formState.resolution.width = Math.round(newHeight * ratio)
+  }
+  // 触发编码器切换检查
+  handleVideoParamChange()
+}
 
 const getFileType = (filename: string): 'video' | 'audio' | 'unknown' => {
   if (filename.match(/\.(mp4|mov|mkv|avi|webm|flv)$/i)) return 'video'
@@ -102,7 +124,6 @@ const availableContainers = computed(() => {
   return []
 })
 
-// 当选择模式改变时，自动设置一个合理的默认容器
 watch(selectionMode, (newMode) => {
   if (newMode === 'video') {
     formState.container = 'mp4'
@@ -110,10 +131,6 @@ watch(selectionMode, (newMode) => {
     formState.container = 'mp3'
   }
 })
-
-// =================================================================
-// 升级结束
-// =================================================================
 
 const getPreviewInfo = async (fileId: string) => {
   isPreviewLoading.value = true
@@ -202,7 +219,6 @@ watch(previewFileInfo, (fileInfo) => {
     modalEndTime.value = props.initialEndTime
   }
 
-  // 默认容器的选择现在由 selectionMode 的 watch 控制，这里不再需要
   formState.videoCodec = 'copy'
   formState.audioCodec = 'copy'
 
@@ -446,7 +462,7 @@ const handleCancel = () => {
                     :min="1"
                     addon-after="宽"
                     style="width: 100%"
-                    @change="handleVideoParamChange"
+                    @change="handleWidthChange"
                   />
                 </a-col>
                 <a-col :span="10">
@@ -455,7 +471,7 @@ const handleCancel = () => {
                     :min="1"
                     addon-after="高"
                     style="width: 100%"
-                    @change="handleVideoParamChange"
+                    @change="handleHeightChange"
                   />
                 </a-col>
                 <a-col :span="4" style="display: flex; align-items: center">

@@ -15,12 +15,10 @@ const authStore = useAuthStore()
 const fileStore = useFileStore()
 
 const isExportModalVisible = ref(false)
-const selectedTaskId = ref<number | null>(null) // 当前选中的任务ID
+const selectedTaskId = ref<number | null>(null)
 
-// 任务刷新定时器
-let taskRefreshInterval: number | null = null
+let healthCheckInterval: number | null = null
 
-// 更新后的导出点击逻辑
 const handleExportClick = () => {
   if (fileStore.fileList.length === 0) {
     message.warning('文件列表为空，请先上传一些文件再执行导出操作。')
@@ -29,59 +27,58 @@ const handleExportClick = () => {
   isExportModalVisible.value = true
 }
 
-// 获取选中的任务对象
 const selectedTask = computed(() => {
   if (selectedTaskId.value === null) return null
   return fileStore.taskList.find((task) => task.id === selectedTaskId.value) || null
 })
 
-// 选择任务并显示详情
 const selectTask = (taskId: number) => {
   selectedTaskId.value = taskId
 }
 
-// 启动定时刷新任务列表
-const startTaskRefresh = () => {
-  if (taskRefreshInterval) {
-    clearInterval(taskRefreshInterval)
+// =========================================================
+// 核心修复：将定时器改造为 WebSocket 健康检查器
+// =========================================================
+const startHealthCheck = () => {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval)
   }
-  // 将其视为健康检查，可以将间隔延长，例如10秒
-  taskRefreshInterval = window.setInterval(() => {
+  // 每 10 秒检查一次连接的健康状况
+  healthCheckInterval = window.setInterval(() => {
     if (fileStore.hasActiveTasks) {
-      fileStore.checkAndReconnectWebSockets();
-
+      // 不再调用 fetchTaskList()，而是调用新的健康检查函数
+      fileStore.checkAndReconnectWebSockets()
     } else {
-      stopTaskRefresh()
+      // 如果没有活动任务，停止定时器
+      stopHealthCheck()
     }
-  }, 10000) // 每10秒检查一次连接健康
+  }, 10000)
 }
 
-const stopTaskRefresh = () => {
-  if (taskRefreshInterval) {
-    clearInterval(taskRefreshInterval)
-    taskRefreshInterval = null
+const stopHealthCheck = () => {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval)
+    healthCheckInterval = null
   }
 }
+// =========================================================
+// 修复结束
+// =========================================================
 
 onMounted(async () => {
-  // 应用启动时的核心逻辑：
-  // 1. 检查本地是否存在 token
   if (authStore.isLoggedIn) {
-    // 2. 如果存在，则尝试获取当前用户信息。此函数内部会处理 token 失效的情况（自动登出）
     await authStore.fetchCurrentUser()
 
-    // 3. 如果用户信息成功获取，则初始化文件和任务列表
     if (authStore.user) {
-      fileStore.initializeStore()
-      startTaskRefresh()
+      await fileStore.initializeStore()
+      // 初始化完成后，启动健康检查
+      startHealthCheck()
     }
   }
 })
 
 onUnmounted(() => {
-  if (taskRefreshInterval) {
-    clearInterval(taskRefreshInterval)
-  }
+  stopHealthCheck()
 })
 </script>
 
@@ -100,7 +97,6 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <!-- 左下角工具栏 -->
     <div class="bottom-toolbar">
       <UserInfo />
       <a-button type="primary" shape="round" size="large" @click="handleExportClick">
@@ -108,7 +104,6 @@ onUnmounted(() => {
       </a-button>
     </div>
 
-    <!-- 导出模态框 (移除 :file-info 属性) -->
     <ExportModal
       v-model:visible="isExportModalVisible"
       :initial-start-time="fileStore.startTime"
@@ -130,8 +125,7 @@ onUnmounted(() => {
 .sidebar {
   width: 350px;
   min-width: 300px;
-  /* 保持与主背景一致，减少内边距以让内部卡片靠近边缘 */
-  background-color: transparent; /* 使用透明，显示上层 .app-layout 背景 */
+  background-color: transparent;
   padding: 4px;
   overflow-y: auto;
   flex-shrink: 0;
@@ -163,7 +157,7 @@ onUnmounted(() => {
   z-index: 1000;
   display: flex;
   align-items: center;
-  gap: 16px; /* 按钮和用户信息之间的间距 */
+  gap: 16px;
 }
 
 @media (max-width: 768px) {

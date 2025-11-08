@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.12.0",
     "python-jose[pycryptodome]>=3.5.0",
     "python-multipart>=0.0.20",
+    "slowapi>=0.1.9",
     "sqlalchemy>=2.0.44",
     "uvicorn[standard]>=0.37.0",
 ]

@@ -34,9 +34,6 @@ export const useAuthStore = defineStore('auth', () => {
   // Actions
   async function login(username: string, password: string): Promise<boolean> {
     try {
-      // 核心修复：
-      // 1. 确保请求体被 new URLSearchParams() 包裹，以生成 form data。
-      // 2. 确保 headers 中明确设置了 'Content-Type': 'application/x-www-form-urlencoded'。
       const response = await axios.post<ApiResponse<TokenData>>(
         API_ENDPOINTS.TOKEN,
         new URLSearchParams({
@@ -69,6 +66,12 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error: unknown) {
       if (isAxiosError(error)) {
         if (error.response) {
+          // 处理 429 速率超限错误
+          if (error.response.status === 429) {
+            message.error('登录尝试过于频繁，请稍后再试。');
+            return false; // 明确返回 false
+          }
+
           const apiResponse = error.response.data as ApiResponse<null>
           message.error(apiResponse.message || `服务器错误 (状态码: ${error.response.status})`)
         } else {

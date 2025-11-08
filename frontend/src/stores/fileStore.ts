@@ -1,5 +1,4 @@
 // src/stores/fileStore.ts
-
 import { defineStore } from 'pinia'
 import { ref, type Ref, computed, onUnmounted } from 'vue'
 import axios, { isAxiosError } from 'axios'
@@ -101,7 +100,6 @@ export const useFileStore = defineStore('file', () => {
       const oldTaskIds = new Set(taskList.value.map((task) => task.id))
       taskList.value = response.data
 
-      // 获取任务列表后，为所有新的、活跃的任务建立 WebSocket 连接
       response.data.forEach((task) => {
         if (['pending', 'processing'].includes(task.status) && !oldTaskIds.has(task.id)) {
           connectToTask(task.id)
@@ -113,7 +111,6 @@ export const useFileStore = defineStore('file', () => {
   }
 
   function connectToTask(taskId: number) {
-    // 如果已有健康的连接，则不重复连接
     const existingWs = wsConnections.value.get(taskId)
     if (existingWs && existingWs.readyState === WebSocket.OPEN) {
       return
@@ -143,13 +140,10 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
-  // 新增 Action: 检查并修复 WebSocket 连接
   function checkAndReconnectWebSockets() {
-    // 遍历当前 store 中所有处于活动状态的任务
     taskList.value.forEach((task) => {
       if (['pending', 'processing'].includes(task.status)) {
         const ws = wsConnections.value.get(task.id)
-        // 如果连接不存在，或者已关闭，则尝试重新连接
         if (!ws || ws.readyState === WebSocket.CLOSED) {
           console.warn(`WebSocket for active task #${task.id} is missing or closed. Reconnecting...`)
           connectToTask(task.id)
@@ -197,12 +191,29 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
+  async function fetchSingleTaskAndUpdate(taskId: number) {
+    try {
+      const response = await axios.get<Task>(API_ENDPOINTS.GET_TASK_DETAILS(taskId))
+      const updatedTask = response.data
+
+      const taskIndex = taskList.value.findIndex((task) => task.id === taskId)
+      if (taskIndex !== -1) {
+        // 如果找到了任务，就用最新的数据替换它
+        taskList.value[taskIndex] = updatedTask
+      }
+    } catch (error) {
+      console.error(`Failed to fetch details for task #${taskId}:`, error)
+      message.error('无法获取最新的任务详情。')
+    }
+  }
+
   function addTasks(newTasks: Task[]) {
     newTasks.forEach((newTask) => {
       const existingIndex = taskList.value.findIndex((task) => task.id === newTask.id)
       if (existingIndex !== -1) {
         taskList.value[existingIndex] = newTask
       } else {
+        newTask.status = 'processing'
         taskList.value.unshift(newTask)
       }
       if (['pending', 'processing'].includes(newTask.status)) {
@@ -227,7 +238,6 @@ export const useFileStore = defineStore('file', () => {
         task.status = status
         wsConnections.value.get(taskId)?.close()
         if (status === 'completed' || status === 'failed') {
-          // 移除延迟，实现更即时的UI反馈
           fetchTaskList()
           fetchFileList()
         }
@@ -242,7 +252,6 @@ export const useFileStore = defineStore('file', () => {
       if (selectedFileId.value === fileId) {
         selectFile(null)
       }
-      // 刷新任务列表，因为与文件相关的任务也可能被删除
       await fetchTaskList()
       message.success('File deleted successfully')
     } catch (error: unknown) {
@@ -372,7 +381,6 @@ export const useFileStore = defineStore('file', () => {
     wsConnections.value.forEach((ws) => ws.close())
   })
 
-  // --- Return exposed state, getters, and actions ---
   return {
     selectedFileId,
     fileList,
@@ -398,5 +406,6 @@ export const useFileStore = defineStore('file', () => {
     updateTaskProgress,
     downloadFile,
     checkAndReconnectWebSockets,
+    fetchSingleTaskAndUpdate,
   }
 })

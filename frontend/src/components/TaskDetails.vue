@@ -79,25 +79,18 @@ import { useFileStore, type Task } from '@/stores/fileStore'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons-vue'
 
-// 接收任务作为 prop
 const props = defineProps<{
   task: Task
 }>()
 
-// 定义 emits
 const emit = defineEmits(['close'])
 
-// 文件store实例
 const fileStore = useFileStore()
 
-// 响应式列数，根据屏幕宽度调整
 const descriptionColumns = ref(2)
-
-// 创建 ResizeObserver 实例
 let observer: ResizeObserver | null = null
 const workspaceRef = ref<HTMLElement | null>(null)
 
-// 设置响应式列数
 const setupResizeObserver = () => {
   if (workspaceRef.value) {
     observer = new ResizeObserver((entries) => {
@@ -108,12 +101,20 @@ const setupResizeObserver = () => {
   }
 }
 
+// =========================================================
+// 核心修复：将所有 onMounted 逻辑合并到一个钩子中
+// =========================================================
 onMounted(() => {
+  // 1. 立即发起 API 请求以获取最新任务数据
+  fileStore.fetchSingleTaskAndUpdate(props.task.id)
+
+  // 2. 在下一个 DOM 更新周期后，初始化响应式布局的观察器
   nextTick(() => {
     workspaceRef.value = document.querySelector('.task-details') as HTMLElement
     setupResizeObserver()
   })
 })
+// =========================================================
 
 onBeforeUnmount(() => {
   if (observer) {
@@ -121,7 +122,6 @@ onBeforeUnmount(() => {
   }
 })
 
-// 根据状态获取颜色
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'pending':
@@ -137,7 +137,6 @@ const getStatusColor = (status: string) => {
   }
 }
 
-// 根据状态获取文本
 const getStatusText = (status: string) => {
   switch (status) {
     case 'pending':
@@ -153,19 +152,16 @@ const getStatusText = (status: string) => {
   }
 }
 
-// 检查是否在处理中
 const isProcessing = (status: string) => {
   return ['pending', 'processing'].includes(status)
 }
 
-// 获取进度
 const getProgress = (task: Task) => {
   if (task.status === 'completed') return 100
   if (task.status === 'failed') return 0
   return task.progress || 0
 }
 
-// 复制命令到剪贴板
 const copyCommand = async () => {
   try {
     await navigator.clipboard.writeText(props.task.ffmpeg_command)
@@ -175,76 +171,29 @@ const copyCommand = async () => {
   }
 }
 
-// 复制错误详情到剪贴板
-
 const copyErrorDetails = async () => {
-
   try {
-
     await navigator.clipboard.writeText(props.task.details || '')
-
     message.success('错误信息已复制到剪贴板')
-
   } catch {
-
     message.error('复制错误信息失败')
-
   }
-
 }
-
-
-
-// 定位到处理后的文件
 
 const goToFile = () => {
-
   fileStore.selectFileByTask(props.task)
-
-  emit('close') // 切换回工作区视图
-
+  emit('close')
 }
-
-
-
-// 定位到文件并下载
-
-
 
 const goToFileAndDownload = () => {
-
-
-
   const fileId = fileStore.selectFileByTask(props.task)
-
-
-
   if (fileId) {
-
-
-
-    emit('close') // 切换回工作区视图
-
-
-
+    emit('close')
     nextTick(() => {
-
-
-
       fileStore.downloadFile(fileId)
-
-
-
     })
-
-
-
   }
-
-
-
 }
-
 </script>
 
 <style scoped>

@@ -29,8 +29,6 @@
           name="password"
           :rules="[
             { required: true, message: '请输入密码!' },
-            { min: 6, message: '密码至少6个字符' },
-            { max: 72, message: '密码最多72个字符' },
           ]"
         >
           <a-input-password v-model:value="loginFormState.password" />
@@ -65,11 +63,11 @@
           name="password"
           :rules="[
             { required: true, message: '请输入密码!' },
-            { min: 6, message: '密码至少6个字符' },
+            { min: 8, message: '密码至少8个字符' },
             { max: 72, message: '密码最多72个字符' },
             {
-              pattern: /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d]{6,72}$/,
-              message: '密码必须包含字母和数字',
+              pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/,
+              message: '密码必须包含大小写字母和数字',
             },
           ]"
         >
@@ -102,6 +100,7 @@
 import { reactive, ref } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { message } from 'ant-design-vue'
+import type { RuleObject } from 'ant-design-vue/es/form/interface'
 
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -120,11 +119,7 @@ const registerFormState = reactive({
 
 const handleLogin = async () => {
   loading.value = true
-  const success = await authStore.login(loginFormState.username, loginFormState.password)
-  if (success) {
-    // 登录成功，AuthStore 会自动更新 isLoggedIn 状态
-    // App.vue 会根据 isLoggedIn 状态切换视图
-  }
+  await authStore.login(loginFormState.username, loginFormState.password)
   loading.value = false
 }
 
@@ -136,17 +131,13 @@ const handleRegister = async () => {
   loading.value = true
   const success = await authStore.register(registerFormState.username, registerFormState.password)
   if (success) {
-    // 注册成功，AuthStore.register 已经显示了成功消息
-    currentMode.value = 'login' // 注册成功后切换到登录模式
-    // 清空注册表单
+    currentMode.value = 'login'
     registerFormState.username = ''
     registerFormState.password = ''
     registerFormState.confirmPassword = ''
   }
   loading.value = false
 }
-
-import type { RuleObject } from 'ant-design-vue/es/form/interface'
 
 const validateConfirmPassword = (_rule: RuleObject, value: string) => {
   if (currentMode.value === 'register' && value !== registerFormState.password) {

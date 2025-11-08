@@ -17,7 +17,7 @@ if (window.Capacitor) {
 }
 
 export const API_ENDPOINTS = {
-  TOKEN: `${BASE_URL}/token`,
+TOKEN: `${BASE_URL}/token`,
   CREATE_USER: `${BASE_URL}/users/`,
   CURRENT_USER: `${BASE_URL}/users/me`,
   FILE_LIST: `${BASE_URL}/api/files`,
@@ -26,6 +26,7 @@ export const API_ENDPOINTS = {
   FILE_INFO: (fileId: string) => `${BASE_URL}/api/file-info?filename=${fileId}`,
   PROCESS_FILE: `${BASE_URL}/api/process`,
   TASK_LIST: `${BASE_URL}/api/tasks`,
+  GET_TASK_DETAILS: (taskId: number) => `${BASE_URL}/api/task-status/${taskId}`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
   DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
   DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`,
@@ -33,7 +34,7 @@ export const API_ENDPOINTS = {
     // 从BASE_URL解析主机和协议，构建WebSocket URL
     let wsProtocol = 'ws://';
     let wsHost = BASE_URL;
-    
+
     if (BASE_URL.startsWith('https://')) {
       wsProtocol = 'wss://';
       wsHost = BASE_URL.substring(8); // 移除 'https://' 前缀
@@ -44,7 +45,7 @@ export const API_ENDPOINTS = {
       // 如果BASE_URL没有协议前缀，假定为http
       wsHost = BASE_URL;
     }
-    
+
     return `${wsProtocol}${wsHost}/ws/progress/${taskId}`;
   },
 }
