@@ -10,7 +10,7 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 # 2. 从环境变量中读取JWT配置，提供默认值以方便开发
-SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key")
+SECRET_KEY = os.environ.get("SECRET_KEY", "fibfindtjnbtuctuhghu5785685687568")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 
