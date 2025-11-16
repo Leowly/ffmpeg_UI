@@ -1,5 +1,5 @@
 # backend/schemas.py - Pydantic models for data validation
-from typing import Optional, List, TypeVar, Generic, Any
+from typing import Optional, List, TypeVar, Generic
 from pydantic import BaseModel, Field, validator
 import re
 

@@ -1,6 +1,5 @@
 # main.py - FastAPI app entry point
 import os
-import sys
 import asyncio
 import logging
 

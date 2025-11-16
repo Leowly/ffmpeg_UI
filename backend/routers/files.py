@@ -9,15 +9,14 @@ from typing import List, Tuple
 import shlex
 
 import aiofiles
-from fastapi import (APIRouter, BackgroundTasks, Depends, HTTPException,
-                     UploadFile, status)
+from fastapi import (APIRouter, Depends, HTTPException,UploadFile,)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
-from ..processing import manager, run_ffmpeg_process, user_task_queues
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, invalidate_file_path_cache
+from ..processing import manager, user_task_queues
+from ..config import UPLOAD_DIRECTORY, reconstruct_file_path
 
 router = APIRouter(
     tags=["Files"],
