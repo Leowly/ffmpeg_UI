@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
-from ..processing import manager, run_ffmpeg_process, task_queue 
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path 
+from ..processing import manager, run_ffmpeg_process, task_queue, user_task_queues 
+from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, invalidate_file_path_cache 
 
 router = APIRouter(
     tags=["Files"],
@@ -281,8 +281,11 @@ async def process_files(
             "temp_output_path": temp_output_path,
             "final_output_path": final_output_path,
             "final_display_name": final_display_name,
+            "owner_id": current_user.id,
         }
-        await task_queue.put(task_details)
+        # 将任务添加到特定用户的队列中
+        user_queue = user_task_queues[current_user.id]
+        await user_queue.put(task_details)
         
         created_tasks.append(db_task)
 
@@ -307,12 +310,15 @@ async def delete_user_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     loop = asyncio.get_running_loop()
-    
+
     resolved_path = await loop.run_in_executor(
         None, reconstruct_file_path, db_file.filepath, current_user.id
     )
 
-    await loop.run_in_executor(None, crud.delete_file, db, file_id, resolved_path)
+    try:
+        await loop.run_in_executor(None, crud.delete_file, db, file_id, resolved_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     return {"message": f"File {filename} deleted."}
 
@@ -350,6 +356,9 @@ async def upload_file(
                 user_id=current_user.id
             )
         db_file = await loop.run_in_executor(None, db_create)
+
+        # Optionally clear cache when a new file is uploaded
+        # invalidate_file_path_cache()
 
         return schemas.FileResponseForFrontend(
             uid=str(db_file.id),

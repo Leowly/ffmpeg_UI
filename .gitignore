@@ -3,3 +3,4 @@
 gha-creds-*.json
 pack_sources.bat
 package.txt
+.qwen

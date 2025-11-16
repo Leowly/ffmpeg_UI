@@ -18,9 +18,6 @@ from .limiter import limiter, _rate_limit_exceeded_handler
 
 load_dotenv()
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(

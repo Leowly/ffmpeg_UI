@@ -50,6 +50,15 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     if not db_file:
         return None
 
+    # Check for running tasks that might depend on this file
+    running_tasks = db.query(models.ProcessingTask).filter(
+        models.ProcessingTask.source_filename == db_file.filename,
+        models.ProcessingTask.status.in_(['processing', 'queued'])  # Assuming these are running states
+    ).count()
+
+    if running_tasks > 0:
+        raise ValueError(f"Cannot delete file {file_id} because it has {running_tasks} running tasks associated with it")
+
     # --- 新增的逻辑：先删除物理文件 ---
     # 优先使用从 API 层传入的、经过解析的真实路径
     path_to_delete = file_path or db_file.filepath
@@ -57,10 +66,9 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
         try:
             os.remove(path_to_delete)
         except OSError as e:
-            # 如果文件删除失败，可以选择记录日志并中断操作，避免删除数据库记录
-            # 这里为了简单起见，我们继续执行，但生产环境中应处理此异常
+            # If file deletion fails, raise an exception to prevent database changes
             print(f"Error deleting file {path_to_delete}: {e}")
-            # raise  # 或者直接抛出异常，让整个事务回滚
+            raise  # This will cause the entire transaction to be rolled back
 
     # 找到所有引用该文件作为结果文件的任务并删除它们
     db.query(models.ProcessingTask).filter(

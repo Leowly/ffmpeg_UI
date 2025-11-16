@@ -16,6 +16,10 @@ dependencies = [
     "slowapi>=0.1.9",
     "sqlalchemy>=2.0.44",
     "uvicorn[standard]>=0.37.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "httpx>=0.24.0",
+    "coverage>=7.0.0",
 ]
 
 [[tool.uv.index]]

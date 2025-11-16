@@ -16,36 +16,60 @@ from fastapi import WebSocket
 from . import crud, schemas
 from .database import SessionLocal
 
-task_queue = asyncio.Queue()
+import collections
+
+# 为每个用户维护一个独立的任务队列
+user_task_queues = collections.defaultdict(asyncio.Queue)
 
 async def worker():
     """
-    一个永续运行的后台工作者，从队列中一次取出一个任务并执行。
+    一个永续运行的后台工作者，从各个用户队列中轮流获取任务并执行。
     """
     while True:
-        # 从队列中等待并获取下一个任务
-        task_details = await task_queue.get()
-        
-        print(f"Worker picked up task: {task_details['task_id']}")
-        
-        # 使用 'try...except' 确保即使一个任务失败，工作者也不会崩溃
-        try:
-            # 调用我们现有的处理函数来执行任务
-            await run_ffmpeg_process(
-                task_id=task_details['task_id'],
-                command_args=task_details['command_args'],
-                total_duration=task_details['total_duration'],
-                conn_manager=task_details['conn_manager'],
-                display_command=task_details['display_command'],
-                temp_output_path=task_details['temp_output_path'],
-                final_output_path=task_details['final_output_path'],
-                final_display_name=task_details['final_display_name'],
-            )
-        except Exception as e:
-            print(f"An error occurred while processing task {task_details['task_id']}: {e}")
-        
-        # 标记任务完成，以便队列可以继续处理
-        task_queue.task_done()
+        # 循环检查所有用户队列，实现公平调度
+        user_ids = list(user_task_queues.keys())
+        if not user_ids:
+            # 如果没有用户队列，短暂等待后继续
+            await asyncio.sleep(0.1)
+            continue
+
+        for user_id in user_ids[:]:  # 使用切片副本避免在迭代时修改
+            try:
+                # 尝试从当前用户队列获取任务（非阻塞）
+                if not user_task_queues[user_id].empty():
+                    task_details = user_task_queues[user_id].get_nowait()
+
+                    print(f"Worker picked up task: {task_details['task_id']} for user {task_details['owner_id']}")
+
+                    # 使用 'try...except' 确保即使一个任务失败，工作者也不会崩溃
+                    try:
+                        # 调用我们现有的处理函数来执行任务
+                        await run_ffmpeg_process(
+                            task_id=task_details['task_id'],
+                            command_args=task_details['command_args'],
+                            total_duration=task_details['total_duration'],
+                            conn_manager=task_details['conn_manager'],
+                            display_command=task_details['display_command'],
+                            temp_output_path=task_details['temp_output_path'],
+                            final_output_path=task_details['final_output_path'],
+                            final_display_name=task_details['final_display_name'],
+                        )
+                    except Exception as e:
+                        print(f"An error occurred while processing task {task_details['task_id']}: {e}")
+
+                    # 标记任务完成，以便队列可以继续处理
+                    user_task_queues[user_id].task_done()
+                    break  # 处理完一个任务后继续下一轮循环
+            except asyncio.QueueEmpty:
+                # 当前用户队列为空，继续检查下一个用户
+                continue
+            except Exception:
+                # 如果处理过程中出现其他异常，继续检查下一个用户
+                continue
+
+        # 避免忙等待
+        if all(user_task_queues[user_id].empty() for user_id in user_ids):
+            await asyncio.sleep(0.01)  # 短暂休眠
 
 # --- WebSocket Connection Manager ---
 class ConnectionManager:
@@ -176,12 +200,12 @@ def run_ffmpeg_blocking(
         return False, str(e)
 
 async def run_ffmpeg_process(
-    task_id: int, 
-    command_args: list, 
+    task_id: int,
+    command_args: list,
     total_duration: float,
     conn_manager: ConnectionManager,
-    display_command: str = "", 
-    temp_output_path: str = "", 
+    display_command: str = "",
+    temp_output_path: str = "",
     final_output_path: str = "",
     final_display_name: str = ""
 ):
@@ -195,7 +219,7 @@ async def run_ffmpeg_process(
         crud.update_task(db, task_id=task_id, status="processing", progress=0)
 
         loop = asyncio.get_running_loop()
-        
+
         success, full_stderr = await loop.run_in_executor(
             None,
             run_ffmpeg_blocking,
@@ -224,10 +248,10 @@ async def run_ffmpeg_process(
                     new_db_file = crud.create_user_file(db=db, file=new_file_schema, user_id=task.owner_id)
 
                 crud.update_task(
-                    db, 
-                    task_id=task_id, 
-                    status="completed", 
-                    details=full_stderr, 
+                    db,
+                    task_id=task_id,
+                    status="completed",
+                    details=full_stderr,
                     progress=100,
                     result_file_id=new_db_file.id if new_db_file else None
                 )
@@ -239,18 +263,22 @@ async def run_ffmpeg_process(
                 logger.error(error_msg, exc_info=True)
                 crud.update_task(db, task_id=task_id, status="failed", details=error_msg)
                 await conn_manager.send_progress(task_id, 100, "failed")
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
         else:
             logger.error(f"Task {task_id} failed. Stderr: {full_stderr}")
             crud.update_task(db, task_id=task_id, status="failed", details=full_stderr)
             await conn_manager.send_progress(task_id, 100, "failed")
-            if os.path.exists(temp_output_path):
-                os.remove(temp_output_path)
 
     except Exception as e:
         logger.error(f"Exception in async wrapper for task {task_id}: {e!r}", exc_info=True)
         crud.update_task(db, task_id=task_id, status="failed", details=str(e))
     finally:
+        # Cleanup temporary files to ensure they're removed even if the process fails
+        if os.path.exists(temp_output_path) and temp_output_path != final_output_path:
+            try:
+                os.remove(temp_output_path)
+                logger.info(f"Cleaned up temporary file: {temp_output_path}")
+            except OSError as e:
+                logger.error(f"Failed to remove temporary file {temp_output_path}: {e}")
+
         conn_manager.disconnect(task_id)
         db.close()
