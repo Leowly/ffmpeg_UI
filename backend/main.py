@@ -13,7 +13,7 @@ from . import models
 from .routers import users, files, tasks
 from .processing import manager, worker
 from .config import UPLOAD_DIRECTORY
-from .limiter import limiter, _rate_limit_exceeded_handler
+from .limiter import limiter
 
 load_dotenv()
 
@@ -26,7 +26,6 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
