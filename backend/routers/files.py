@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
-from ..processing import manager, run_ffmpeg_process, task_queue, user_task_queues 
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, invalidate_file_path_cache 
+from ..processing import manager, run_ffmpeg_process, user_task_queues
+from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, invalidate_file_path_cache
 
 router = APIRouter(
     tags=["Files"],
@@ -51,7 +51,7 @@ async def get_file_info(
     db_file = crud.get_file_by_id(db, file_id=file_id)
     if not db_file or db_file.owner_id != current_user.id:
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     file_path = db_file.filepath
     resolved = await asyncio.get_running_loop().run_in_executor(
         None, reconstruct_file_path, file_path, current_user.id
@@ -244,7 +244,7 @@ async def process_files(
     db: Session = Depends(get_db)
 ):
     created_tasks = []
-    
+
     for file_id_str in payload.files:
         try:
             file_id = int(file_id_str)
@@ -263,7 +263,7 @@ async def process_files(
         temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
         temp_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), temp_output_filename))
         command = construct_ffmpeg_command(input_path, temp_output_path, payload)
-        
+
         ffmpeg_command_str = " ".join(shlex.quote(c) for c in command)
 
         task_in = schemas.TaskCreate(
@@ -286,12 +286,12 @@ async def process_files(
         # 将任务添加到特定用户的队列中
         user_queue = user_task_queues[current_user.id]
         await user_queue.put(task_details)
-        
+
         created_tasks.append(db_task)
 
     if not created_tasks:
         raise HTTPException(status_code=404, detail="No valid files found.")
-    
+
     return created_tasks
 
 @router.delete("/delete-file")
