@@ -72,8 +72,19 @@ export const useAuthStore = defineStore('auth', () => {
             return false; // 明确返回 false
           }
 
-          const apiResponse = error.response.data as ApiResponse<null>
-          message.error(apiResponse.message || `服务器错误 (状态码: ${error.response.status})`)
+          const data = error.response.data as any // 临时设为 any 以便检查属性
+          let msg = '服务器错误'
+
+          if (data.message) {
+            msg = data.message // 你的 APIResponse 格式
+          } else if (data.detail) {
+            // FastAPI 默认错误格式
+            msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+          } else {
+            msg = `服务器错误 (状态码: ${error.response.status})`
+          }
+
+          message.error(msg)
         } else {
           message.error('无法连接到服务器，请检查网络或确认后端服务已运行。')
         }
@@ -106,6 +117,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    const fileStore = useFileStore()
+    fileStore.resetStore() // <--- 核心修复：清理文件和Socket状态
+
     token.value = null
     user.value = null
     localStorage.removeItem('access_token')

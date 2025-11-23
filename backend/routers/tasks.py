@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
+from ..processing import terminate_task_process  # 引入刚才写的函数
 
 # 核心修复：移除 prefix="/api"
 router = APIRouter(
@@ -29,10 +30,14 @@ def delete_task(
     db_task = crud.get_task(db, task_id=task_id)
     if db_task and db_task.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    
+
     if db_task:
+        # 如果任务正在运行，先杀进程
+        if db_task.status in ['processing', 'pending']:
+            terminate_task_process(task_id)
+
         crud.delete_task(db, task_id=task_id)
-    
+
     return
 
 @router.get("/task-status/{taskId}", response_model=schemas.Task)

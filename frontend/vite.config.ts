@@ -1,48 +1,47 @@
 import { fileURLToPath, URL } from 'node:url'
-
 import { defineConfig, loadEnv, PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+import path from 'path' // 新增
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const vite_host = new URL(env.VITE_API_BASE_URL).hostname
+  // 核心修改：告诉 loadEnv 去上级目录('../') 找环境变量
+  const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
 
-  // ** [修改] 动态加载插件 **
+  // 防止意外情况，给个默认值
+  const baseUrl = env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+  const vite_host = new URL(baseUrl).hostname
+
   const plugins: PluginOption[] = [vue()];
   if (mode !== 'production') {
     plugins.push(vueDevTools());
   }
 
   return {
-    plugins, // 使用动态插件数组
+    // 核心修改：设置 envDir 指向根目录
+    envDir: '..',
+
+    plugins,
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))
       },
     },
     define: {
-      // 确保全局类型定义被包含
       global: 'globalThis',
     },
-    // 基础路径设置，用于 Nginx 反代理
     base: './',
-    // 构建选项
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
       rollupOptions: {
         output: {
-          // 静态资源分目录存放
           assetFileNames: (assetInfo) => {
-            if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-              return 'css/[name].[hash][extname]';
-            }
-            if (assetInfo.name && assetInfo.name.endsWith('.js')) {
-              return 'js/[name].[hash][extname]';
-            }
-            return 'assets/[name].[hash][extname]';
+             // ... 保持原有代码 ...
+             if (assetInfo.name && assetInfo.name.endsWith('.css')) return 'css/[name].[hash][extname]';
+             if (assetInfo.name && assetInfo.name.endsWith('.js')) return 'js/[name].[hash][extname]';
+             return 'assets/[name].[hash][extname]';
           },
           chunkFileNames: 'js/[name].[hash].js',
           entryFileNames: 'js/[name].[hash].js',
@@ -53,15 +52,15 @@ export default defineConfig(({ mode }) => {
       allowedHosts: [vite_host],
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL,
+          target: baseUrl, // 使用加载到的变量
           changeOrigin: true,
         },
         '/token': {
-          target: env.VITE_API_BASE_URL,
+          target: baseUrl,
           changeOrigin: true,
         },
         '/users': {
-          target: env.VITE_API_BASE_URL,
+          target: baseUrl,
           changeOrigin: true,
         }
       }

@@ -377,6 +377,22 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
+  function resetStore() {
+    // 1. 关闭所有活跃的 WebSocket 连接
+    wsConnections.value.forEach((ws) => ws.close())
+    wsConnections.value.clear()
+
+    // 2. 重置状态
+    fileList.value = []
+    taskList.value = []
+    selectedFileId.value = null
+    fileInfo.value = null
+    error.value = null
+    isLoading.value = false
+    startTime.value = 0
+    endTime.value = 0
+  }
+
   onUnmounted(() => {
     wsConnections.value.forEach((ws) => ws.close())
   })
@@ -407,5 +423,6 @@ export const useFileStore = defineStore('file', () => {
     downloadFile,
     checkAndReconnectWebSockets,
     fetchSingleTaskAndUpdate,
+    resetStore, // 导出此方法
   }
 })

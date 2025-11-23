@@ -1,6 +1,16 @@
 # backend/config.py
 import os
 from functools import lru_cache
+from pathlib import Path
+from dotenv import load_dotenv
+
+# --- 核心修改：加载根目录 .env ---
+# 获取当前文件 (backend/config.py) 的父目录的父目录，即项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = BASE_DIR / ".env"
+
+# 加载环境变量
+load_dotenv(dotenv_path=ENV_PATH)
 
 # --- Global Configurations ---
 UPLOAD_DIRECTORY = "./backend/workspaces"

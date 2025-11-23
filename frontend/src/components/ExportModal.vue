@@ -132,16 +132,30 @@ watch(selectionMode, (newMode) => {
   }
 })
 
+let currentRequestId = 0
+
 const getPreviewInfo = async (fileId: string) => {
   isPreviewLoading.value = true
+
+  // 生成本次请求的唯一标识
+  const requestId = ++currentRequestId
+
   try {
     const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
-    previewFileInfo.value = response.data
+
+    // 核心修复：只有当这是最后一次发出的请求时，才更新 UI
+    if (requestId === currentRequestId) {
+        previewFileInfo.value = response.data
+    }
   } catch {
-    message.error('加载预览文件信息失败')
-    previewFileInfo.value = null
+    if (requestId === currentRequestId) {
+        message.error('加载预览文件信息失败')
+        previewFileInfo.value = null
+    }
   } finally {
-    isPreviewLoading.value = false
+    if (requestId === currentRequestId) {
+        isPreviewLoading.value = false
+    }
   }
 }
 
@@ -312,6 +326,28 @@ const ffmpegCommandPreview = computed(() => {
   return cmd
 })
 
+const validateAudioOnlyConversion = async () => {
+  if (formState.container in ['mp3', 'flac', 'wav', 'aac', 'ogg']) {
+    for (const fileId of formState.selectedFiles) {
+      // 检查是否有音轨
+      try {
+        const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId));
+        const hasAudio = response.data.streams?.some(s => s.codec_type === 'audio');
+
+        if (!hasAudio) {
+          const fileName = fileStore.fileList.find(f => f.id === fileId)?.name || fileId;
+          message.warning(`文件 ${fileName} 无音频流，无法转换为音频格式。`);
+          return false;
+        }
+      } catch (error) {
+        console.error(`无法检查文件 ${fileId} 的音轨信息：`, error);
+        // 如果无法检查，继续尝试（避免阻止用户操作）
+      }
+    }
+  }
+  return true;
+};
+
 const handleOk = async () => {
   if (formState.selectedFiles.length === 0) {
     message.error('请至少选择一个要处理的文件！')
@@ -320,6 +356,11 @@ const handleOk = async () => {
   if (selectionMode.value === 'mixed') {
     message.error('无法处理，请不要混合选择视频和音频文件。')
     return
+  }
+
+  // 预检查纯音频转换
+  if (!await validateAudioOnlyConversion()) {
+    return;
   }
 
   isProcessing.value = true
@@ -368,7 +409,8 @@ const handleCancel = () => {
   <a-modal
     :open="visible"
     title="导出设置"
-    width="800px"
+    width="100%"
+    style="max-width: 800px;"
     centered
     @cancel="handleCancel"
     :confirm-loading="isProcessing"

@@ -9,10 +9,31 @@ from passlib.context import CryptContext
 # 1. 创建一个 CryptContext 实例，并指定 bcrypt 为默认算法
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
-# 2. 从环境变量中读取JWT配置，提供默认值以方便开发
-SECRET_KEY = os.environ.get("SECRET_KEY", "fibfindtjnbtuctuhghu5785685687568")
+# 2. 从环境变量中读取JWT配置，不提供默认值以确保生产环境安全
+SECRET_KEY = os.environ.get("SECRET_KEY")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# 3. 检查必需的环境变量，如果缺失则阻止启动
+if not SECRET_KEY:
+    raise ValueError(
+        "\n\n"
+        "===============================================\n"
+        "❌ CRITICAL SECURITY ERROR: SECRET_KEY is not set!\n"
+        "===============================================\n"
+        "Please set the SECRET_KEY in your .env file.\n"
+        "This is required for secure authentication.\n"
+        "\n"
+        "To fix this:\n"
+        "1. Open your .env file in the project root\n"
+        "2. Add: SECRET_KEY=your-super-secret-key-here\n"
+        "   (Use a strong random key, at least 32 characters)\n"
+        "3. Restart the application\n"
+        "\n"
+        "Example (use a unique key in production!):\n"
+        "SECRET_KEY=3x4mpl3v3rys3cur3k3yf0rpr0d3nv1r0nm3nt\n"
+        "===============================================\n"
+    )
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -2,8 +2,10 @@
 from typing import cast
 from sqlalchemy.orm import Session
 import os
+import time
 from . import models, schemas
 from .security import get_password_hash
+from .config import invalidate_file_path_cache
 
 # --- User CRUD Operations ---
 
@@ -53,22 +55,27 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     # Check for running tasks that might depend on this file
     running_tasks = db.query(models.ProcessingTask).filter(
         models.ProcessingTask.source_filename == db_file.filename,
-        models.ProcessingTask.status.in_(['processing', 'queued'])  # Assuming these are running states
+        models.ProcessingTask.status.in_(['processing', 'queued'])
     ).count()
 
     if running_tasks > 0:
         raise ValueError(f"Cannot delete file {file_id} because it has {running_tasks} running tasks associated with it")
 
-    # --- 新增的逻辑：先删除物理文件 ---
+
     # 优先使用从 API 层传入的、经过解析的真实路径
     path_to_delete = file_path or db_file.filepath
     if os.path.exists(path_to_delete):
         try:
             os.remove(path_to_delete)
         except OSError as e:
-            # If file deletion fails, raise an exception to prevent database changes
-            print(f"Error deleting file {path_to_delete}: {e}")
-            raise  # This will cause the entire transaction to be rolled back
+            # 简单的重试机制，应对 Windows 文件锁
+            print(f"Delete failed, retrying in 0.5s: {e}")
+            time.sleep(0.5)
+            try:
+                os.remove(path_to_delete)
+            except OSError as e2:
+                print(f"Error deleting file {path_to_delete}: {e2}")
+                raise
 
     # 找到所有引用该文件作为结果文件的任务并删除它们
     db.query(models.ProcessingTask).filter(
@@ -83,6 +90,10 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     # 最后删除文件本身的数据库记录
     db.delete(db_file)
     db.commit()
+
+    # Invalidate the file path cache to prevent stale entries
+    invalidate_file_path_cache()
+
     return db_file
 
 # --- Task CRUD Operations ---
@@ -98,7 +109,7 @@ def get_task(db: Session, task_id: int):
 
 def create_task(db: Session, task: schemas.TaskCreate, owner_id: int, output_path: str):
     db_task = models.ProcessingTask(
-        **task.model_dump(), 
+        **task.model_dump(),
         owner_id=owner_id,
         output_path=output_path
     )

@@ -21,6 +21,9 @@ import collections
 # 为每个用户维护一个独立的任务队列
 user_task_queues = collections.defaultdict(asyncio.Queue)
 
+# 新增：全局字典存储正在运行的进程句柄
+active_ffmpeg_processes: Dict[int, subprocess.Popen] = {}
+
 async def worker():
     """
     一个永续运行的后台工作者，从各个用户队列中轮流获取任务并执行。
@@ -103,7 +106,7 @@ def run_ffmpeg_blocking(
     conn_manager: ConnectionManager,
 ) -> Tuple[bool, str]:
     import re
-    
+
     time_re = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
     logger = logging.getLogger("ffmpeg_runner")
     proc = None
@@ -117,6 +120,10 @@ def run_ffmpeg_blocking(
             errors='ignore',
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
+
+        # --- 新增 ---
+        active_ffmpeg_processes[task_id] = proc
+        # -----------
 
         q: Queue[str] = Queue()
 
@@ -198,6 +205,22 @@ def run_ffmpeg_blocking(
     except Exception as e:
         logger.error(f"Exception in blocking runner for task {task_id}: {e!r}", exc_info=True)
         return False, str(e)
+
+    finally:
+        # --- 新增：清理字典 ---
+        if task_id in active_ffmpeg_processes:
+            del active_ffmpeg_processes[task_id]
+        # ---------------------
+
+# 新增：提供一个取消任务的函数供外部调用
+def terminate_task_process(task_id: int):
+    if task_id in active_ffmpeg_processes:
+        proc = active_ffmpeg_processes[task_id]
+        print(f"Terminating FFmpeg process for task {task_id}")
+        proc.kill() # 或者 proc.terminate()
+        return True
+    return False
+
 
 async def run_ffmpeg_process(
     task_id: int,

@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { onUnmounted, ref, computed, watch } from 'vue'
 import AppSidebar from './components/AppSidebar.vue'
 import SingleFileWorkspace from './components/SingleFileWorkspace.vue'
 import AuthForm from './components/AuthForm.vue'
@@ -65,17 +65,23 @@ const stopHealthCheck = () => {
 // 修复结束
 // =========================================================
 
-onMounted(async () => {
-  if (authStore.isLoggedIn) {
-    await authStore.fetchCurrentUser()
-
-    if (authStore.user) {
-      await fileStore.initializeStore()
-      // 初始化完成后，启动健康检查
-      startHealthCheck()
+// 监听登录状态变化
+watch(
+  () => authStore.isLoggedIn,
+  (isLoggedIn) => {
+    if (isLoggedIn) {
+      // 登录后：获取用户 -> 初始化 Store -> 启动检查
+      authStore.fetchCurrentUser().then(() => {
+        fileStore.initializeStore()
+        startHealthCheck()
+      })
+    } else {
+      // 退出后：停止检查
+      stopHealthCheck()
     }
-  }
-})
+  },
+  { immediate: true } // 初始化时立即执行一次
+)
 
 onUnmounted(() => {
   stopHealthCheck()

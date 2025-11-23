@@ -344,17 +344,23 @@ async def upload_file(
         loop = asyncio.get_running_loop()
         file_size = await loop.run_in_executor(None, os.path.getsize, file_location)
 
-        def db_create():
-            return crud.create_user_file(
-                db=db,
-                file=schemas.FileCreate(
-                    filename=file.filename,
-                    filepath=file_location,
-                    status="uploaded"
-                ),
-                user_id=current_user.id
-            )
-        db_file = await loop.run_in_executor(None, db_create)
+        try:
+            def db_create():
+                return crud.create_user_file(
+                    db=db,
+                    file=schemas.FileCreate(
+                        filename=file.filename,
+                        filepath=file_location,
+                        status="uploaded"
+                    ),
+                    user_id=current_user.id
+                )
+            db_file = await loop.run_in_executor(None, db_create)
+        except Exception as e:
+            # 如果数据库写入失败，删除刚刚上传的文件
+            if os.path.exists(file_location):
+                os.remove(file_location)
+            raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
         # Optionally clear cache when a new file is uploaded
         # invalidate_file_path_cache()

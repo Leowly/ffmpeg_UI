@@ -31,21 +31,11 @@ TOKEN: `${BASE_URL}/token`,
   DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
   DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`,
   WS_PROGRESS: (taskId: number) => {
-    // 从BASE_URL解析主机和协议，构建WebSocket URL
-    let wsProtocol = 'ws://';
-    let wsHost = BASE_URL;
-
-    if (BASE_URL.startsWith('https://')) {
-      wsProtocol = 'wss://';
-      wsHost = BASE_URL.substring(8); // 移除 'https://' 前缀
-    } else if (BASE_URL.startsWith('http://')) {
-      wsProtocol = 'ws://';
-      wsHost = BASE_URL.substring(7); // 移除 'http://' 前缀
-    } else {
-      // 如果BASE_URL没有协议前缀，假定为http
-      wsHost = BASE_URL;
-    }
-
-    return `${wsProtocol}${wsHost}/ws/progress/${taskId}`;
+    // 自动处理相对路径或绝对路径
+    const url = new URL(BASE_URL.startsWith('http') ? BASE_URL : window.location.origin + BASE_URL);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    // 移除末尾斜杠以防双斜杠
+    const basePath = url.toString().replace(/\/$/, '');
+    return `${basePath}/ws/progress/${taskId}`;
   },
 }

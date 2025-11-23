@@ -2,20 +2,15 @@
 import os
 import asyncio
 import logging
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from slowapi.errors import RateLimitExceeded
-
-from .database import engine
-from . import models
+from . import config 
+from .database import engine, SessionLocal
+from . import models, crud
 from .routers import users, files, tasks
 from .processing import manager, worker
 from .config import UPLOAD_DIRECTORY
 from .limiter import limiter
-
-load_dotenv()
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -52,6 +47,25 @@ app.include_router(tasks.router, prefix="/api")
 @app.on_event("startup")
 async def startup_event():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Clean up stale tasks that were left in processing/pending state due to server restart
+    db = SessionLocal()
+    try:
+        # 查找所有正在进行但因重启而中断的任务
+        stale_tasks = db.query(models.ProcessingTask).filter(
+            models.ProcessingTask.status.in_(['processing', 'pending'])
+        ).all()
+
+        for task in stale_tasks:
+            print(f"Marking stale task {task.id} as failed due to server restart.")
+            task.status = "failed"
+            task.details = "Server restarted while task was pending/processing."
+        db.commit()
+    except Exception as e:
+        print(f"Error cleaning up stale tasks: {e}")
+    finally:
+        db.close()
+
     asyncio.create_task(worker())
     print(">>> Background worker started.")
 
