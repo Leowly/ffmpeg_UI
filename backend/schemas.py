@@ -85,6 +85,11 @@ class Resolution(BaseModel):
     height: int
     keepAspectRatio: bool
 
+# 新增：系统能力响应模型
+class SystemCapabilities(BaseModel):
+    has_hardware_acceleration: bool
+    hardware_type: Optional[str] = None # e.g., 'nvidia', 'intel', 'amd', 'mac'
+
 class ProcessPayload(BaseModel):
     files: List[str]
     container: str
@@ -96,6 +101,12 @@ class ProcessPayload(BaseModel):
     videoBitrate: Optional[int] = None
     resolution: Optional[Resolution] = None
     audioBitrate: Optional[int] = None
+
+    # 新增字段
+    useHardwareAcceleration: bool = False
+
+    # 新增字段：预设策略 ('fast', 'balanced', 'quality')
+    preset: str = "balanced"
 
 # --- Task Schemas ---
 class TaskBase(BaseModel):

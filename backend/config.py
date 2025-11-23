@@ -12,6 +12,10 @@ ENV_PATH = BASE_DIR / ".env"
 # 加载环境变量
 load_dotenv(dotenv_path=ENV_PATH)
 
+# --- New Configuration ---
+# 读取环境变量，默认为 True
+ENABLE_HW_ACCEL_DETECTION = os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower() == "true"
+
 # --- Global Configurations ---
 UPLOAD_DIRECTORY = "./backend/workspaces"
 

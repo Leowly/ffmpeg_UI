@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useFileStore, type FFProbeResult, type Task } from '@/stores/fileStore'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
+import { ThunderboltOutlined } from '@ant-design/icons-vue'
 import axios, { isAxiosError } from 'axios'
 
 interface ProcessPayload {
@@ -16,6 +17,8 @@ interface ProcessPayload {
   videoBitrate?: number
   resolution?: { width: number; height: number; keepAspectRatio: boolean }
   audioBitrate?: number
+  useHardwareAcceleration: boolean // 新增
+  preset: string // 新增
 }
 
 const props = defineProps<{
@@ -40,6 +43,8 @@ const formState = reactive({
   resolution: { width: 1920, height: 1080, keepAspectRatio: true },
   audioCodec: 'copy',
   audioBitrate: 192,
+  useHardwareAcceleration: false, // 新增：默认为 false
+  preset: 'balanced', // 新增：默认为平衡
 })
 
 const originalValues = reactive({
@@ -129,6 +134,14 @@ watch(selectionMode, (newMode) => {
     formState.container = 'mp4'
   } else if (newMode === 'audio') {
     formState.container = 'mp3'
+  }
+})
+
+// 3. 监听文件类型变化，智能开启硬件加速
+// 当检测到有视频且系统支持硬件加速时，自动勾选（可选，提升体验）
+watch(selectionMode, (newMode) => {
+  if (newMode === 'video' && fileStore.systemCapabilities.has_hardware_acceleration) {
+    formState.useHardwareAcceleration = true
   }
 })
 
@@ -373,6 +386,8 @@ const handleOk = async () => {
       totalDuration: totalDuration.value,
       videoCodec: formState.videoCodec,
       audioCodec: formState.audioCodec,
+      useHardwareAcceleration: formState.useHardwareAcceleration, // 传递参数
+      preset: formState.preset, // 传递参数
     }
     if (formState.videoCodec !== 'copy') {
       if (formState.videoBitrate !== originalValues.videoBitrate)
@@ -469,6 +484,26 @@ const handleCancel = () => {
         style="margin-bottom: 16px"
       />
 
+      <!-- === 新增：硬件加速开关 === -->
+      <div
+        v-if="selectionMode === 'video' && fileStore.systemCapabilities.has_hardware_acceleration"
+        class="hw-accel-section"
+        style="margin-bottom: 16px;"
+      >
+        <a-alert type="success" show-icon>
+          <template #message>
+            <span style="font-weight: bold">检测到硬件加速可用 ({{ fileStore.systemCapabilities.hardware_type?.toUpperCase() }})</span>
+          </template>
+          <template #description>
+            <a-checkbox v-model:checked="formState.useHardwareAcceleration">
+              启用硬件编码加速 (大幅提升速度，但可能略微影响画质)
+            </a-checkbox>
+          </template>
+          <template #icon><ThunderboltOutlined /></template>
+        </a-alert>
+      </div>
+      <!-- ======================== -->
+
       <div
         v-if="!previewFileInfo && formState.selectedFiles.length > 0"
         class="settings-placeholder"
@@ -491,6 +526,12 @@ const handleCancel = () => {
                 <a-select-option value="libx265">H.265 (libhevc)</a-select-option>
                 <a-select-option value="libaom-av1">AV1 (libaom-av1)</a-select-option>
               </a-select>
+              <!-- 添加提示 -->
+              <div v-if="formState.useHardwareAcceleration && formState.videoCodec !== 'copy'" class="ant-form-item-explain ant-form-item-explain-connected">
+                <small style="color: #1890ff">
+                  将自动使用 {{ fileStore.systemCapabilities.hardware_type }} 对应的硬件编码器
+                </small>
+              </div>
             </a-form-item>
 
             <a-form-item label="视频比特率 (kbps)">
@@ -500,6 +541,29 @@ const handleCancel = () => {
                 style="width: 100%"
                 @change="handleVideoParamChange"
               />
+            </a-form-item>
+
+            <!-- 性能预设 (速度 vs 画质) -->
+            <a-form-item label="性能预设 (速度 vs 画质)">
+              <a-radio-group v-model:value="formState.preset" button-style="solid">
+                <a-radio-button value="fast">速度优先</a-radio-button>
+                <a-radio-button value="balanced">平衡</a-radio-button>
+                <a-radio-button value="quality">画质优先</a-radio-button>
+              </a-radio-group>
+
+              <!-- 动态提示文案 -->
+              <div class="ant-form-item-explain ant-form-item-explain-connected" style="margin-top: 6px; font-size: 12px; color: #888;">
+                <span v-if="formState.useHardwareAcceleration && fileStore.systemCapabilities.hardware_type === 'nvidia'">
+                  <template v-if="formState.preset === 'fast'">NVENC P1: 极速转码，适合预览。</template>
+                  <template v-if="formState.preset === 'balanced'">NVENC P4: 推荐，速度与画质的最佳平衡。</template>
+                  <template v-if="formState.preset === 'quality'">NVENC P7: 极致画质，速度较慢，适合存档。</template>
+                </span>
+                <span v-else-if="!formState.useHardwareAcceleration">
+                  <template v-if="formState.preset === 'fast'">CPU Superfast: 文件积大，画质一般。</template>
+                  <template v-if="formState.preset === 'balanced'">CPU Medium: 标准设置。</template>
+                  <template v-if="formState.preset === 'quality'">CPU Slow: 压缩率高，画质好，但在老旧CPU上极慢。</template>
+                </span>
+              </div>
             </a-form-item>
 
             <a-form-item label="分辨率">

@@ -48,6 +48,12 @@ export interface FFProbeResult {
   format: FormatInfo
 }
 
+// 新增类型
+interface SystemCapabilities {
+  has_hardware_acceleration: boolean
+  hardware_type: string | null
+}
+
 export interface Task {
   id: number
   ffmpeg_command: string
@@ -73,6 +79,12 @@ export const useFileStore = defineStore('file', () => {
   const endTime = ref(0)
   const triggerTaskPanel = ref(false)
   const wsConnections: Ref<Map<number, WebSocket>> = ref(new Map())
+
+  // 新增 State
+  const systemCapabilities = ref<SystemCapabilities>({
+    has_hardware_acceleration: false,
+    hardware_type: null
+  })
 
   // --- Getters ---
   const totalDuration = computed(() => {
@@ -300,11 +312,6 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
-  async function initializeStore() {
-    await fetchFileList()
-    await fetchTaskList()
-  }
-
   async function downloadFile(fileId: string) {
     const downloadUrl = API_ENDPOINTS.DOWNLOAD_FILE(fileId)
     const loadingMessage = message.loading('Preparing to download...', 0)
@@ -394,6 +401,24 @@ export const useFileStore = defineStore('file', () => {
     endTime.value = 0
   }
 
+  // 新增 Action
+  async function fetchSystemCapabilities() {
+    try {
+      const response = await axios.get<SystemCapabilities>(API_ENDPOINTS.GET_CAPABILITIES)
+      systemCapabilities.value = response.data
+    } catch (error) {
+      console.error('Failed to fetch system capabilities:', error)
+      // 默认无硬件加速
+      systemCapabilities.value = { has_hardware_acceleration: false, hardware_type: null }
+    }
+  }
+
+  async function initializeStore() {
+    await fetchFileList()
+    await fetchTaskList()
+    await fetchSystemCapabilities() // 初始化时获取能力
+  }
+
   onUnmounted(() => {
     wsConnections.value.forEach((ws) => ws.close())
   })
@@ -424,6 +449,8 @@ export const useFileStore = defineStore('file', () => {
     downloadFile,
     checkAndReconnectWebSockets,
     fetchSingleTaskAndUpdate,
+    systemCapabilities, // 导出状态
+    fetchSystemCapabilities, // 导出方法
     resetStore, // 导出此方法
   }
 })

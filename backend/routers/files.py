@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
 from ..processing import manager, user_task_queues
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path
+from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, ENABLE_HW_ACCEL_DETECTION
 
 router = APIRouter(
     tags=["Files"],
@@ -35,6 +35,50 @@ def detect_video_codec(input_path: str) -> str:
         return result.stdout.strip()
     except Exception:
         return ""
+
+# --- 新增：硬件加速检测逻辑 ---
+def detect_hardware_encoder() -> str | None:
+    """
+    检测可用的硬件编码器类型。
+    返回: 'nvidia', 'intel', 'amd', 'mac' 或 None
+    """
+    if not ENABLE_HW_ACCEL_DETECTION:
+        return None
+
+    try:
+        # 获取所有可用编码器
+        result = subprocess.run(
+            ["ffmpeg", "-v", "quiet", "-encoders"],
+            capture_output=True,
+            text=True
+        )
+        output = result.stdout
+
+        # 按照优先级检测
+        if "h264_nvenc" in output or "hevc_nvenc" in output:
+            return "nvidia"
+        if "h264_qsv" in output or "hevc_qsv" in output:
+            return "intel"
+        if "h264_amf" in output or "hevc_amf" in output:
+            return "amd"
+        if "h264_videotoolbox" in output or "hevc_videotoolbox" in output:
+            return "mac"
+
+    except Exception as e:
+        print(f"Error detecting hardware acceleration: {e}")
+
+    return None
+
+# --- 新增 API：获取系统能力 ---
+@router.get("/capabilities", response_model=schemas.SystemCapabilities)
+async def get_system_capabilities(
+    current_user: models.User = Depends(get_current_user)
+):
+    hw_type = await asyncio.get_running_loop().run_in_executor(None, detect_hardware_encoder)
+    return schemas.SystemCapabilities(
+        has_hardware_acceleration=bool(hw_type),
+        hardware_type=hw_type
+    )
 
 @router.get("/file-info", response_model=schemas.FileInfoResponse)
 async def get_file_info(
@@ -167,7 +211,28 @@ async def download_file(
     return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
 
 def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.ProcessPayload) -> list:
+    # === 新增：硬件编码器映射逻辑 ===
     video_codec = params.videoCodec
+
+    if params.useHardwareAcceleration and video_codec != 'copy':
+        hw_type = detect_hardware_encoder() # 再次确认，防止前端伪造
+
+        if hw_type == 'nvidia':
+            if video_codec == 'libx264': video_codec = 'h264_nvenc'
+            elif video_codec == 'libx265': video_codec = 'hevc_nvenc'
+            elif video_codec == 'libaom-av1': video_codec = 'av1_nvenc' # 如果显卡支持
+        elif hw_type == 'intel':
+            if video_codec == 'libx264': video_codec = 'h264_qsv'
+            elif video_codec == 'libx265': video_codec = 'hevc_qsv'
+        elif hw_type == 'amd':
+            if video_codec == 'libx264': video_codec = 'h264_amf'
+            elif video_codec == 'libx265': video_codec = 'hevc_amf'
+        elif hw_type == 'mac':
+            if video_codec == 'libx264': video_codec = 'h264_videotoolbox'
+            elif video_codec == 'libx265': video_codec = 'hevc_videotoolbox'
+    # ==============================
+
+    # 保持原有音频编码器逻辑
     audio_codec = params.audioCodec
     container = params.container
     is_audio_only_output = container in ['mp3', 'flac', 'wav', 'aac', 'ogg']
@@ -195,6 +260,18 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
             audio_codec = 'pcm_s16le'
 
     command = ["ffmpeg", "-y"]
+
+    # === 修改：硬件解码参数 (可选，提升解码速度) ===
+    # 如果使用硬件编码，最好也尝试硬件解码输入流
+    if params.useHardwareAcceleration:
+        hw_type = detect_hardware_encoder()
+        if hw_type == 'nvidia':
+            command.extend(["-hwaccel", "cuda"])
+        elif hw_type == 'intel':
+            command.extend(["-hwaccel", "qsv"])
+        # 其他平台视情况而定
+    # ==========================================
+
     input_codec_name = detect_video_codec(input_path)
     if input_codec_name == 'av1':
         command.extend(["-c:v", "av1_cuvid"])
@@ -217,6 +294,53 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
     if not is_audio_only_output:
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
+
+            # === 新增：智能预设映射逻辑 ===
+            # 定义映射表：{硬件类型: {通用策略: 具体参数}}
+            preset_map = {
+                'nvidia': {
+                    'fast': 'p1',      # 最快
+                    'balanced': 'p4',  # 平衡 (默认)
+                    'quality': 'p7'    # 最高画质
+                },
+                'intel': {
+                    'fast': 'veryfast',
+                    'balanced': 'medium',
+                    'quality': 'veryslow'
+                },
+                'amd': {
+                    'fast': 'speed',
+                    'balanced': 'balanced',
+                    'quality': 'quality'
+                },
+                'mac': {
+                    'fast': 'speed',
+                    'balanced': 'default', # VideoToolbox 通常用 bitrate 控制，preset 影响较小，但设为默认较安全
+                    'quality': 'quality' # 部分版本支持
+                },
+                'cpu': { # 纯 CPU 模式 (libx264/libx265)
+                    'fast': 'superfast',
+                    'balanced': 'medium',
+                    'quality': 'slow' # 注意：veryslow 会极慢
+                }
+            }
+
+            # 确定当前使用的类型 (如果是硬件加速则用 hw_type，否则视为 cpu)
+            current_hw_type = detect_hardware_encoder() if params.useHardwareAcceleration else 'cpu'
+
+            # 获取具体参数，默认为 balanced
+            # 注意：Mac VideoToolbox 有时不支持 -preset，这里做一个简单的容错
+            if current_hw_type in preset_map:
+                actual_preset = preset_map[current_hw_type].get(params.preset, 'medium')
+
+                # QSV 和 CPU 使用 -preset
+                if current_hw_type in ['cpu', 'intel', 'nvidia']:
+                    command.extend(["-preset", actual_preset])
+                # AMD 使用 -quality
+                elif current_hw_type == 'amd':
+                    command.extend(["-quality", actual_preset])
+                # Mac 通常不需要显式 preset，或者参数不同，这里暂略以保安全
+
             if params.startTime > 0 or params.endTime < params.totalDuration:
                 command.extend(["-force_key_frames", "expr:eq(n,0)"])
             if params.videoBitrate:
