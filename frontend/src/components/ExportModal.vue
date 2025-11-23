@@ -387,7 +387,13 @@ const handleOk = async () => {
       payload.audioBitrate = formState.audioBitrate
 
     const response = await axios.post<Task[]>(API_ENDPOINTS.PROCESS_FILE, payload)
+
+    // 1. 本地乐观更新
     fileStore.addTasks(response.data)
+
+    // 🟢 【修改】新增下面这一行：立即从后端同步最新状态
+    await fileStore.fetchTaskList()
+
     message.success(`成功创建 ${response.data.length} 个处理任务，已在后台开始执行。`)
     emit('update:visible', false)
   } catch (error: unknown) {

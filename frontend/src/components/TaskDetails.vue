@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useFileStore, type Task } from '@/stores/fileStore'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons-vue'
@@ -86,6 +86,17 @@ const props = defineProps<{
 const emit = defineEmits(['close'])
 
 const fileStore = useFileStore()
+
+// 🟢 【修改】新增 watch 监听任务 ID 变化
+watch(
+  () => props.task.id,
+  (newId) => {
+    if (newId) {
+      // 当切换到另一个任务时，立即请求最新详情
+      fileStore.fetchSingleTaskAndUpdate(newId)
+    }
+  }
+)
 
 const descriptionColumns = ref(2)
 let observer: ResizeObserver | null = null

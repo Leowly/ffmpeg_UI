@@ -213,7 +213,8 @@ export const useFileStore = defineStore('file', () => {
       if (existingIndex !== -1) {
         taskList.value[existingIndex] = newTask
       } else {
-        newTask.status = 'processing'
+        // 🔴 【修改】删除或注释掉下面这一行 - 不强制将新任务状态设为 'processing'
+        // newTask.status = 'processing'
         taskList.value.unshift(newTask)
       }
       if (['pending', 'processing'].includes(newTask.status)) {
