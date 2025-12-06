@@ -2,11 +2,10 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv, PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
-import path from 'path' // 新增
+import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  // 核心修改：告诉 loadEnv 去上级目录('../') 找环境变量
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
 
   // 防止意外情况，给个默认值
@@ -19,7 +18,6 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    // 核心修改：设置 envDir 指向根目录
     envDir: '..',
 
     plugins,

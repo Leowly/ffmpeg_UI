@@ -36,7 +36,6 @@ def detect_video_codec(input_path: str) -> str:
     except Exception:
         return ""
 
-# --- 新增：硬件加速检测逻辑 ---
 def detect_hardware_encoder() -> str | None:
     """
     检测可用的硬件编码器类型。
@@ -69,7 +68,6 @@ def detect_hardware_encoder() -> str | None:
 
     return None
 
-# --- 新增 API：获取系统能力 ---
 @router.get("/capabilities", response_model=schemas.SystemCapabilities)
 async def get_system_capabilities(
     current_user: models.User = Depends(get_current_user)
@@ -211,16 +209,15 @@ async def download_file(
     return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
 
 def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.ProcessPayload) -> list:
-    # === 新增：硬件编码器映射逻辑 ===
     video_codec = params.videoCodec
 
     if params.useHardwareAcceleration and video_codec != 'copy':
-        hw_type = detect_hardware_encoder() # 再次确认，防止前端伪造
+        hw_type = detect_hardware_encoder()
 
         if hw_type == 'nvidia':
             if video_codec == 'libx264': video_codec = 'h264_nvenc'
             elif video_codec == 'libx265': video_codec = 'hevc_nvenc'
-            elif video_codec == 'libaom-av1': video_codec = 'av1_nvenc' # 如果显卡支持
+            elif video_codec == 'libaom-av1': video_codec = 'av1_nvenc'
         elif hw_type == 'intel':
             if video_codec == 'libx264': video_codec = 'h264_qsv'
             elif video_codec == 'libx265': video_codec = 'hevc_qsv'
@@ -230,7 +227,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         elif hw_type == 'mac':
             if video_codec == 'libx264': video_codec = 'h264_videotoolbox'
             elif video_codec == 'libx265': video_codec = 'hevc_videotoolbox'
-    # ==============================
 
     # 保持原有音频编码器逻辑
     audio_codec = params.audioCodec
@@ -261,7 +257,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
 
     command = ["ffmpeg", "-y"]
 
-    # === 修改：硬件解码参数 (可选，提升解码速度) ===
     # 如果使用硬件编码，最好也尝试硬件解码输入流
     if params.useHardwareAcceleration:
         hw_type = detect_hardware_encoder()
@@ -270,7 +265,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         elif hw_type == 'intel':
             command.extend(["-hwaccel", "qsv"])
         # 其他平台视情况而定
-    # ==========================================
 
     input_codec_name = detect_video_codec(input_path)
     if input_codec_name == 'av1':
@@ -295,7 +289,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
 
-            # === 新增：智能预设映射逻辑 ===
             # 定义映射表：{硬件类型: {通用策略: 具体参数}}
             preset_map = {
                 'nvidia': {

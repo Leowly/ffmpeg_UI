@@ -4,7 +4,6 @@ from functools import lru_cache
 from pathlib import Path
 from dotenv import load_dotenv
 
-# --- 核心修改：加载根目录 .env ---
 # 获取当前文件 (backend/config.py) 的父目录的父目录，即项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_PATH = BASE_DIR / ".env"
@@ -12,14 +11,11 @@ ENV_PATH = BASE_DIR / ".env"
 # 加载环境变量
 load_dotenv(dotenv_path=ENV_PATH)
 
-# --- New Configuration ---
 # 读取环境变量，默认为 True
 ENABLE_HW_ACCEL_DETECTION = os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower() == "true"
 
-# --- Global Configurations ---
 UPLOAD_DIRECTORY = "./backend/workspaces"
 
-# --- Utility Functions ---
 @lru_cache(maxsize=128)
 def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
     # 确保上传目录存在

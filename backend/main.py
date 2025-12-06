@@ -38,8 +38,7 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-# --- Include Routers ---
-# 核心修复：在这里添加 prefix="/api"
+
 app.include_router(users.router) # 用户路由通常在根路径，如 /token, /users/
 app.include_router(files.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")

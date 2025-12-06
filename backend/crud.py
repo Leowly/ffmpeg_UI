@@ -7,8 +7,6 @@ from . import models, schemas
 from .security import get_password_hash
 from .config import invalidate_file_path_cache
 
-# --- User CRUD Operations ---
-
 def get_user_by_username(db: Session, username: str):
     """通过用户名查询用户"""
     return db.query(models.User).filter(models.User.username == username).first()
@@ -22,8 +20,6 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.commit()
     db.refresh(db_user)
     return db_user
-
-# --- File CRUD Operations ---
 
 def create_user_file(db: Session, file: schemas.FileCreate, user_id: int):
     db_file = models.File(**file.model_dump(), owner_id=user_id)
@@ -51,8 +47,6 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     db_file = db.query(models.File).filter(models.File.id == file_id).first()
     if not db_file:
         return None
-
-    # Check for running tasks that might depend on this file
     running_tasks = db.query(models.ProcessingTask).filter(
         models.ProcessingTask.source_filename == db_file.filename,
         models.ProcessingTask.status.in_(['processing', 'queued'])
@@ -91,12 +85,9 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     db.delete(db_file)
     db.commit()
 
-    # Invalidate the file path cache to prevent stale entries
     invalidate_file_path_cache()
 
     return db_file
-
-# --- Task CRUD Operations ---
 
 def get_user_tasks(db: Session, owner_id: int, skip: int = 0, limit: int = 100):
     return db.query(models.ProcessingTask).filter(models.ProcessingTask.owner_id == owner_id).offset(skip).limit(limit).all()

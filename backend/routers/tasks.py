@@ -8,7 +8,6 @@ from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
 from ..processing import terminate_task_process  # 引入刚才写的函数
 
-# 核心修复：移除 prefix="/api"
 router = APIRouter(
     tags=["Tasks"],
 )

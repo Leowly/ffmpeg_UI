@@ -36,9 +36,6 @@ const selectTask = (taskId: number) => {
   selectedTaskId.value = taskId
 }
 
-// =========================================================
-// 核心修复：将定时器改造为 WebSocket 健康检查器
-// =========================================================
 const startHealthCheck = () => {
   if (healthCheckInterval) {
     clearInterval(healthCheckInterval)
@@ -61,10 +58,6 @@ const stopHealthCheck = () => {
     healthCheckInterval = null
   }
 }
-// =========================================================
-// 修复结束
-// =========================================================
-
 // 监听登录状态变化
 watch(
   () => authStore.isLoggedIn,

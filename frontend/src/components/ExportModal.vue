@@ -17,8 +17,8 @@ interface ProcessPayload {
   videoBitrate?: number
   resolution?: { width: number; height: number; keepAspectRatio: boolean }
   audioBitrate?: number
-  useHardwareAcceleration: boolean // 新增
-  preset: string // 新增
+  useHardwareAcceleration: boolean
+  preset: string
 }
 
 const props = defineProps<{
@@ -43,8 +43,8 @@ const formState = reactive({
   resolution: { width: 1920, height: 1080, keepAspectRatio: true },
   audioCodec: 'copy',
   audioBitrate: 192,
-  useHardwareAcceleration: false, // 新增：默认为 false
-  preset: 'balanced', // 新增：默认为平衡
+  useHardwareAcceleration: false,
+  preset: 'balanced',
 })
 
 const originalValues = reactive({
@@ -156,7 +156,6 @@ const getPreviewInfo = async (fileId: string) => {
   try {
     const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
 
-    // 核心修复：只有当这是最后一次发出的请求时，才更新 UI
     if (requestId === currentRequestId) {
         previewFileInfo.value = response.data
     }
@@ -406,7 +405,6 @@ const handleOk = async () => {
     // 1. 本地乐观更新
     fileStore.addTasks(response.data)
 
-    // 🟢 【修改】新增下面这一行：立即从后端同步最新状态
     await fileStore.fetchTaskList()
 
     message.success(`成功创建 ${response.data.length} 个处理任务，已在后台开始执行。`)
@@ -484,7 +482,6 @@ const handleCancel = () => {
         style="margin-bottom: 16px"
       />
 
-      <!-- === 新增：硬件加速开关 === -->
       <div
         v-if="selectionMode === 'video' && fileStore.systemCapabilities.has_hardware_acceleration"
         class="hw-accel-section"

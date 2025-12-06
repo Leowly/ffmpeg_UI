@@ -79,16 +79,14 @@ class FileResponseForFrontend(BaseModel):
     class Config:
         from_attributes = True
 
-# --- Process Payload Schemas ---
 class Resolution(BaseModel):
     width: int
     height: int
     keepAspectRatio: bool
 
-# 新增：系统能力响应模型
 class SystemCapabilities(BaseModel):
     has_hardware_acceleration: bool
-    hardware_type: Optional[str] = None # e.g., 'nvidia', 'intel', 'amd', 'mac'
+    hardware_type: Optional[str] = None
 
 class ProcessPayload(BaseModel):
     files: List[str]
@@ -102,10 +100,8 @@ class ProcessPayload(BaseModel):
     resolution: Optional[Resolution] = None
     audioBitrate: Optional[int] = None
 
-    # 新增字段
     useHardwareAcceleration: bool = False
 
-    # 新增字段：预设策略 ('fast', 'balanced', 'quality')
     preset: str = "balanced"
 
 # --- Task Schemas ---

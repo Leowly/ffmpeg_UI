@@ -21,7 +21,7 @@ import collections
 # 为每个用户维护一个独立的任务队列
 user_task_queues = collections.defaultdict(asyncio.Queue)
 
-# 新增：全局字典存储正在运行的进程句柄
+# 全局字典存储正在运行的进程句柄
 active_ffmpeg_processes: Dict[int, subprocess.Popen] = {}
 
 async def worker():
@@ -36,15 +36,13 @@ async def worker():
             await asyncio.sleep(0.1)
             continue
 
-        for user_id in user_ids[:]:  # 使用切片副本避免在迭代时修改
+        for user_id in user_ids[:]:
             try:
                 # 尝试从当前用户队列获取任务（非阻塞）
                 if not user_task_queues[user_id].empty():
                     task_details = user_task_queues[user_id].get_nowait()
 
                     print(f"Worker picked up task: {task_details['task_id']} for user {task_details['owner_id']}")
-
-                    # 使用 'try...except' 确保即使一个任务失败，工作者也不会崩溃
                     try:
                         # 调用我们现有的处理函数来执行任务
                         await run_ffmpeg_process(
@@ -121,9 +119,7 @@ def run_ffmpeg_blocking(
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
 
-        # --- 新增 ---
         active_ffmpeg_processes[task_id] = proc
-        # -----------
 
         q: Queue[str] = Queue()
 
@@ -207,12 +203,9 @@ def run_ffmpeg_blocking(
         return False, str(e)
 
     finally:
-        # --- 新增：清理字典 ---
         if task_id in active_ffmpeg_processes:
             del active_ffmpeg_processes[task_id]
-        # ---------------------
 
-# 新增：提供一个取消任务的函数供外部调用
 def terminate_task_process(task_id: int):
     if task_id in active_ffmpeg_processes:
         proc = active_ffmpeg_processes[task_id]

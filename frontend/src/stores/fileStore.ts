@@ -48,7 +48,6 @@ export interface FFProbeResult {
   format: FormatInfo
 }
 
-// 新增类型
 interface SystemCapabilities {
   has_hardware_acceleration: boolean
   hardware_type: string | null
@@ -80,13 +79,11 @@ export const useFileStore = defineStore('file', () => {
   const triggerTaskPanel = ref(false)
   const wsConnections: Ref<Map<number, WebSocket>> = ref(new Map())
 
-  // 新增 State
   const systemCapabilities = ref<SystemCapabilities>({
     has_hardware_acceleration: false,
     hardware_type: null
   })
 
-  // --- Getters ---
   const totalDuration = computed(() => {
     return fileInfo.value ? parseFloat(fileInfo.value.format.duration) : 0
   })
@@ -95,7 +92,6 @@ export const useFileStore = defineStore('file', () => {
     return taskList.value.some((task) => ['pending', 'processing'].includes(task.status))
   })
 
-  // --- Actions ---
   async function fetchFileList() {
     try {
       const response = await axios.get<UserFile[]>(API_ENDPOINTS.FILE_LIST)
@@ -225,8 +221,6 @@ export const useFileStore = defineStore('file', () => {
       if (existingIndex !== -1) {
         taskList.value[existingIndex] = newTask
       } else {
-        // 🔴 【修改】删除或注释掉下面这一行 - 不强制将新任务状态设为 'processing'
-        // newTask.status = 'processing'
         taskList.value.unshift(newTask)
       }
       if (['pending', 'processing'].includes(newTask.status)) {
@@ -401,7 +395,6 @@ export const useFileStore = defineStore('file', () => {
     endTime.value = 0
   }
 
-  // 新增 Action
   async function fetchSystemCapabilities() {
     try {
       const response = await axios.get<SystemCapabilities>(API_ENDPOINTS.GET_CAPABILITIES)

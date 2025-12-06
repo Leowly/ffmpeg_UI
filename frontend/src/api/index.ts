@@ -30,7 +30,7 @@ TOKEN: `${BASE_URL}/token`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
   DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
   DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`,
-  GET_CAPABILITIES: `${BASE_URL}/api/capabilities`, // 新增
+  GET_CAPABILITIES: `${BASE_URL}/api/capabilities`,
   WS_PROGRESS: (taskId: number) => {
     // 自动处理相对路径或绝对路径
     const url = new URL(BASE_URL.startsWith('http') ? BASE_URL : window.location.origin + BASE_URL);

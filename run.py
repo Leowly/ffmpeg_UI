@@ -1,9 +1,8 @@
-# D:\32685\code\ffmpeg_UI\run.py
 import uvicorn
 import asyncio
 import sys
 
-# 核心：在 Uvicorn 做任何事之前，就设置好正确的事件循环策略
+# 在 Uvicorn 做任何事之前，就设置好正确的事件循环策略
 if sys.platform == "win32":
     print(">>> [run.py] Setting WindowsProactorEventLoopPolicy for Uvicorn...")
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())

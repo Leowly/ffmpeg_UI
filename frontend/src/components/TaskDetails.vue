@@ -87,7 +87,6 @@ const emit = defineEmits(['close'])
 
 const fileStore = useFileStore()
 
-// 🟢 【修改】新增 watch 监听任务 ID 变化
 watch(
   () => props.task.id,
   (newId) => {
@@ -112,9 +111,6 @@ const setupResizeObserver = () => {
   }
 }
 
-// =========================================================
-// 核心修复：将所有 onMounted 逻辑合并到一个钩子中
-// =========================================================
 onMounted(() => {
   // 1. 立即发起 API 请求以获取最新任务数据
   fileStore.fetchSingleTaskAndUpdate(props.task.id)
@@ -125,7 +121,7 @@ onMounted(() => {
     setupResizeObserver()
   })
 })
-// =========================================================
+
 
 onBeforeUnmount(() => {
   if (observer) {
