@@ -216,10 +216,6 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
     
     # 仅当用户开启硬件加速开关时，才去检测硬件类型
     hw_type = detect_hardware_encoder() if params.useHardwareAcceleration else None
-    
-    # 获取输入文件的编码格式（为了避开 AV1 硬解的坑）
-    input_codec_name = detect_video_codec(input_path)
-
     # 2. 确定视频编码器 (输出端)
     if params.useHardwareAcceleration and video_codec != 'copy':
         if hw_type == 'nvidia':
@@ -240,10 +236,7 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
 
     # 3. 容器兼容性检查
     if not is_audio_only_output and video_codec != 'copy':
-        # 检查是否已经是硬件编码器 (防止被下方的逻辑覆盖回 libx264)
         is_hw_codec = any(k in video_codec for k in ['nvenc', 'qsv', 'amf', 'videotoolbox'])
-        
-        # 只有在它是纯 CPU 编码器时，才执行兼容性回退
         if not is_hw_codec:
             if container == 'mp4' and video_codec not in ['libx264', 'libx265', 'libaom-av1']:
                 video_codec = 'libx264'
@@ -268,33 +261,27 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
             audio_codec = 'pcm_s16le'
 
     # ==========================================
-    # 4. 构建命令行 (关键部分)
+    # 4. 构建命令行
     # ==========================================
     command = ["ffmpeg", "-y"]
 
-    # 标记变量：是否启用了输入端硬件解码
-    # 如果为 True，说明解码后的数据在显存 (VRAM) 中
-    # 如果为 False，说明解码后的数据在内存 (RAM) 中
     enable_input_hw_accel = False
 
     if params.useHardwareAcceleration:
-        # 策略：如果输入是 AV1，为了稳定，禁用输入硬解 (除非你有 RTX 30/40 系显卡)
-        # 这里假设为了兼容性，遇到 AV1 就用 CPU 解
-        if input_codec_name == 'av1':
-            print(f"检测到 AV1 输入: 禁用硬件解码以防止崩溃，但保留 GPU 编码。")
-            enable_input_hw_accel = False
-        else:
-            enable_input_hw_accel = True
+        enable_input_hw_accel = True
 
         if enable_input_hw_accel:
             if hw_type == 'nvidia':
-                # 加上 -hwaccel_output_format cuda 实现零拷贝 (Zero-Copy)
+                # 开启 CUDA 硬件加速和零拷贝
                 command.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
             elif hw_type == 'intel':
                 command.extend(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"])
-            # 其他硬件类型视情况添加
+            # 其他平台视情况而定
 
-    command.extend(["-analyzeduration", "20M", "-probesize", "20M"])
+    # 保持大缓冲区，这对 NVDEC 解析 AV1 头信息至关重要
+    command.extend(["-analyzeduration", "100M", "-probesize", "100M"])
+    command.extend(["-ignore_unknown"])
+
     command.extend(["-i", input_path])
 
     if params.startTime > 0:
@@ -308,16 +295,12 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
     else:
         command.extend(["-map", "0:v?", "-map", "0:a?"])
 
-    command.extend(["-fflags", "+genpts", "-avoid_negative_ts", "make_zero"])
+    command.extend(["-fflags", "+genpts"])
 
     if not is_audio_only_output:
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
 
-            # 5. 智能 Preset 选择
-            # 根据最终选定的 codec 字符串来反推使用的是 CPU 还是 GPU
-            # 这能确保即使 params.useHardwareAcceleration 为 True 但回退到了 libx265，
-            # 这里也会正确使用 medium 而不是 p1
             actual_hw_type = 'cpu'
             if 'nvenc' in video_codec: actual_hw_type = 'nvidia'
             elif 'qsv' in video_codec: actual_hw_type = 'intel'
@@ -340,15 +323,14 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
             elif actual_hw_type != 'mac': 
                 command.extend(["-preset", actual_preset])
 
-            # 6. 处理分辨率 (Scale)
+            # 处理分辨率 - 智能选择 GPU 滤镜
             if params.resolution:
-                # 只有当开启了输入硬解 (数据在显存) 且是 Nvidia 时，才用 scale_cuda
                 if enable_input_hw_accel and actual_hw_type == 'nvidia':
+                     # RTX 4050 可以在 GPU 内直接缩放
                      command.extend(["-vf", f"scale_cuda={params.resolution.width}:{params.resolution.height}"])
                 elif enable_input_hw_accel and actual_hw_type == 'intel':
                      command.extend(["-vf", f"scale_qsv={params.resolution.width}:{params.resolution.height}"])
                 else:
-                    # 回退到 CPU 缩放 (-s)
                     command.extend(["-s", f"{params.resolution.width}x{params.resolution.height}"])
 
             if params.startTime > 0 or params.endTime < params.totalDuration:
