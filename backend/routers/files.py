@@ -209,11 +209,19 @@ async def download_file(
     return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
 
 def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.ProcessPayload) -> list:
+    # 1. 基础参数准备
     video_codec = params.videoCodec
+    audio_codec = params.audioCodec
+    container = params.container
+    
+    # 仅当用户开启硬件加速开关时，才去检测硬件类型
+    hw_type = detect_hardware_encoder() if params.useHardwareAcceleration else None
+    
+    # 获取输入文件的编码格式（为了避开 AV1 硬解的坑）
+    input_codec_name = detect_video_codec(input_path)
 
+    # 2. 确定视频编码器 (输出端)
     if params.useHardwareAcceleration and video_codec != 'copy':
-        hw_type = detect_hardware_encoder()
-
         if hw_type == 'nvidia':
             if video_codec == 'libx264': video_codec = 'h264_nvenc'
             elif video_codec == 'libx265': video_codec = 'hevc_nvenc'
@@ -228,19 +236,23 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
             if video_codec == 'libx264': video_codec = 'h264_videotoolbox'
             elif video_codec == 'libx265': video_codec = 'hevc_videotoolbox'
 
-    # 保持原有音频编码器逻辑
-    audio_codec = params.audioCodec
-    container = params.container
     is_audio_only_output = container in ['mp3', 'flac', 'wav', 'aac', 'ogg']
 
+    # 3. 容器兼容性检查
     if not is_audio_only_output and video_codec != 'copy':
-        if container == 'mp4' and video_codec not in ['libx264', 'libx265']:
-            video_codec = 'libx264'
-        elif container == 'mkv' and video_codec not in ['libx264', 'libx265', 'libaom-av1', 'vp9']:
-            video_codec = 'libx264'
-        elif container == 'mov' and video_codec not in ['libx264', 'libx265']:
-            video_codec = 'libx264'
+        # 检查是否已经是硬件编码器 (防止被下方的逻辑覆盖回 libx264)
+        is_hw_codec = any(k in video_codec for k in ['nvenc', 'qsv', 'amf', 'videotoolbox'])
+        
+        # 只有在它是纯 CPU 编码器时，才执行兼容性回退
+        if not is_hw_codec:
+            if container == 'mp4' and video_codec not in ['libx264', 'libx265', 'libaom-av1']:
+                video_codec = 'libx264'
+            elif container == 'mkv' and video_codec not in ['libx264', 'libx265', 'libaom-av1', 'vp9']:
+                video_codec = 'libx264'
+            elif container == 'mov' and video_codec not in ['libx264', 'libx265']:
+                video_codec = 'libx264'
 
+    # 音频编码器逻辑
     if audio_codec != 'copy':
         if container in ['mp4', 'mov'] and audio_codec not in ['aac', 'mp3']:
             audio_codec = 'aac'
@@ -255,20 +267,33 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         elif container == 'wav':
             audio_codec = 'pcm_s16le'
 
+    # ==========================================
+    # 4. 构建命令行 (关键部分)
+    # ==========================================
     command = ["ffmpeg", "-y"]
 
-    # 如果使用硬件编码，最好也尝试硬件解码输入流
-    if params.useHardwareAcceleration:
-        hw_type = detect_hardware_encoder()
-        if hw_type == 'nvidia':
-            command.extend(["-hwaccel", "cuda"])
-        elif hw_type == 'intel':
-            command.extend(["-hwaccel", "qsv"])
-        # 其他平台视情况而定
+    # 标记变量：是否启用了输入端硬件解码
+    # 如果为 True，说明解码后的数据在显存 (VRAM) 中
+    # 如果为 False，说明解码后的数据在内存 (RAM) 中
+    enable_input_hw_accel = False
 
-    input_codec_name = detect_video_codec(input_path)
-    if input_codec_name == 'av1':
-        command.extend(["-c:v", "av1_cuvid"])
+    if params.useHardwareAcceleration:
+        # 策略：如果输入是 AV1，为了稳定，禁用输入硬解 (除非你有 RTX 30/40 系显卡)
+        # 这里假设为了兼容性，遇到 AV1 就用 CPU 解
+        if input_codec_name == 'av1':
+            print(f"检测到 AV1 输入: 禁用硬件解码以防止崩溃，但保留 GPU 编码。")
+            enable_input_hw_accel = False
+        else:
+            enable_input_hw_accel = True
+
+        if enable_input_hw_accel:
+            if hw_type == 'nvidia':
+                # 加上 -hwaccel_output_format cuda 实现零拷贝 (Zero-Copy)
+                command.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
+            elif hw_type == 'intel':
+                command.extend(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"])
+            # 其他硬件类型视情况添加
+
     command.extend(["-analyzeduration", "20M", "-probesize", "20M"])
     command.extend(["-i", input_path])
 
@@ -289,57 +314,47 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
 
-            # 定义映射表：{硬件类型: {通用策略: 具体参数}}
+            # 5. 智能 Preset 选择
+            # 根据最终选定的 codec 字符串来反推使用的是 CPU 还是 GPU
+            # 这能确保即使 params.useHardwareAcceleration 为 True 但回退到了 libx265，
+            # 这里也会正确使用 medium 而不是 p1
+            actual_hw_type = 'cpu'
+            if 'nvenc' in video_codec: actual_hw_type = 'nvidia'
+            elif 'qsv' in video_codec: actual_hw_type = 'intel'
+            elif 'amf' in video_codec: actual_hw_type = 'amd'
+            elif 'videotoolbox' in video_codec: actual_hw_type = 'mac'
+
             preset_map = {
-                'nvidia': {
-                    'fast': 'p1',      # 最快
-                    'balanced': 'p4',  # 平衡 (默认)
-                    'quality': 'p7'    # 最高画质
-                },
-                'intel': {
-                    'fast': 'veryfast',
-                    'balanced': 'medium',
-                    'quality': 'veryslow'
-                },
-                'amd': {
-                    'fast': 'speed',
-                    'balanced': 'balanced',
-                    'quality': 'quality'
-                },
-                'mac': {
-                    'fast': 'speed',
-                    'balanced': 'default', # VideoToolbox 通常用 bitrate 控制，preset 影响较小，但设为默认较安全
-                    'quality': 'quality' # 部分版本支持
-                },
-                'cpu': { # 纯 CPU 模式 (libx264/libx265)
-                    'fast': 'superfast',
-                    'balanced': 'medium',
-                    'quality': 'slow' # 注意：veryslow 会极慢
-                }
+                'nvidia': {'fast': 'p1', 'balanced': 'p4', 'quality': 'p7'},
+                'intel': {'fast': 'veryfast', 'balanced': 'medium', 'quality': 'veryslow'},
+                'amd': {'fast': 'speed', 'balanced': 'balanced', 'quality': 'quality'},
+                'mac': {'fast': 'speed', 'balanced': 'default', 'quality': 'quality'},
+                'cpu': {'fast': 'superfast', 'balanced': 'medium', 'quality': 'slow'}
             }
+            
+            preset_options = preset_map.get(actual_hw_type, preset_map['cpu'])
+            actual_preset = preset_options.get(params.preset, preset_options['balanced'])
 
-            # 确定当前使用的类型 (如果是硬件加速则用 hw_type，否则视为 cpu)
-            current_hw_type = detect_hardware_encoder() if params.useHardwareAcceleration else 'cpu'
+            if actual_hw_type == 'amd':
+                command.extend(["-quality", actual_preset])
+            elif actual_hw_type != 'mac': 
+                command.extend(["-preset", actual_preset])
 
-            # 获取具体参数，默认为 balanced
-            # 注意：Mac VideoToolbox 有时不支持 -preset，这里做一个简单的容错
-            if current_hw_type in preset_map:
-                actual_preset = preset_map[current_hw_type].get(params.preset, 'medium')
-
-                # QSV 和 CPU 使用 -preset
-                if current_hw_type in ['cpu', 'intel', 'nvidia']:
-                    command.extend(["-preset", actual_preset])
-                # AMD 使用 -quality
-                elif current_hw_type == 'amd':
-                    command.extend(["-quality", actual_preset])
-                # Mac 通常不需要显式 preset，或者参数不同，这里暂略以保安全
+            # 6. 处理分辨率 (Scale)
+            if params.resolution:
+                # 只有当开启了输入硬解 (数据在显存) 且是 Nvidia 时，才用 scale_cuda
+                if enable_input_hw_accel and actual_hw_type == 'nvidia':
+                     command.extend(["-vf", f"scale_cuda={params.resolution.width}:{params.resolution.height}"])
+                elif enable_input_hw_accel and actual_hw_type == 'intel':
+                     command.extend(["-vf", f"scale_qsv={params.resolution.width}:{params.resolution.height}"])
+                else:
+                    # 回退到 CPU 缩放 (-s)
+                    command.extend(["-s", f"{params.resolution.width}x{params.resolution.height}"])
 
             if params.startTime > 0 or params.endTime < params.totalDuration:
                 command.extend(["-force_key_frames", "expr:eq(n,0)"])
             if params.videoBitrate:
                 command.extend(["-b:v", f"{params.videoBitrate}k"])
-            if params.resolution:
-                command.extend(["-s", f"{params.resolution.width}x{params.resolution.height}"])
         else:
             command.extend(["-c:v", "copy"])
 

@@ -88,6 +88,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
@@ -106,6 +111,9 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.44" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.37.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.1" }]
 
 [[package]]
 name = "bcrypt"
