@@ -260,9 +260,7 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         elif container == 'wav':
             audio_codec = 'pcm_s16le'
 
-    # ==========================================
     # 4. 构建命令行
-    # ==========================================
     command = ["ffmpeg", "-y"]
 
     enable_input_hw_accel = False

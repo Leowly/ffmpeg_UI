@@ -72,7 +72,6 @@ async def worker():
         if all(user_task_queues[user_id].empty() for user_id in user_ids):
             await asyncio.sleep(0.01)  # 短暂休眠
 
-# --- WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, WebSocket] = {}
@@ -112,7 +111,7 @@ def run_ffmpeg_blocking(
     try:
         proc = subprocess.Popen(
             command_args,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
             errors='ignore',
@@ -121,7 +120,7 @@ def run_ffmpeg_blocking(
 
         active_ffmpeg_processes[task_id] = proc
 
-        q: Queue[str] = Queue()
+        q: Queue[str | None] = Queue()
 
         def reader_thread(pipe, queue):
             try:
@@ -131,6 +130,7 @@ def run_ffmpeg_blocking(
             finally:
                 if pipe:
                     pipe.close()
+                queue.put(None)
 
         if proc.stderr:
             Thread(target=reader_thread, args=(proc.stderr, q), daemon=True).start()
@@ -141,8 +141,10 @@ def run_ffmpeg_blocking(
 
         while True:
             try:
+                # 依然设置 timeout 防止极端的死锁情况，但正常情况下不会触发
                 line = q.get(timeout=30)
-                if not line:
+                
+                if line is None:
                     break
                 
                 stderr_lines.append(line)
@@ -172,6 +174,7 @@ def run_ffmpeg_blocking(
                     except Exception:
                         pass
             except Empty:
+                # 只有当 30秒内 既没有日志也没有 None 时才会进这里
                 if proc.poll() is not None:
                     break
                 else:
@@ -183,8 +186,7 @@ def run_ffmpeg_blocking(
         if proc.returncode == 0:
             return True, full_stderr
         else:
-            if not full_stderr and proc.stdout:
-                full_stderr = proc.stdout.read()
+            # stdout 已经是 DEVNULL 了，所以只看 stderr
             return False, full_stderr
 
     except FileNotFoundError:
