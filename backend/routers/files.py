@@ -9,7 +9,14 @@ from typing import List, Tuple
 import shlex
 
 import aiofiles
-from fastapi import (APIRouter, Depends, HTTPException, UploadFile, Request, status)
+from fastapi import (
+    APIRouter, 
+    Depends, 
+    HTTPException, 
+    UploadFile, 
+    Request,      # 用于获取请求头
+    status        # 用于状态码
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,9 +27,10 @@ from ..config import (
     UPLOAD_DIRECTORY, 
     reconstruct_file_path, 
     ENABLE_HW_ACCEL_DETECTION,
-    MAX_UPLOAD_SIZE,
-    ALLOWED_EXTENSIONS
+    MAX_UPLOAD_SIZE,      # 最大限制
+    ALLOWED_EXTENSIONS    # 允许的扩展名
 )
+
 router = APIRouter(
     tags=["Files"],
 )
@@ -440,14 +448,12 @@ async def delete_user_file(
 
 @router.post("/upload", response_model=schemas.FileResponseForFrontend)
 async def upload_file(
-    request: Request,  # <--- 新增 Request 参数
+    request: Request,
     file: UploadFile,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 1. 检查 Content-Length (快速拒绝)
-    # 注意：header 中的 content-length 是整个请求体的大小（包含文件名、边界符等），
-    # 会略大于文件实际大小，但这作为第一道防线非常有效。
+    # --- [第一道防线] 检查 Content-Length ---
     content_length = request.headers.get('content-length')
     if content_length:
         try:
@@ -459,8 +465,7 @@ async def upload_file(
         except ValueError:
             pass # 如果 header 格式不对，忽略，交给流式检查
 
-    # 2. 检查文件扩展名
-    # os.path.splitext 可能无法正确处理文件名中没有点的情况，做个简单判断
+    # --- [第二道防线] 检查文件扩展名 ---
     filename = file.filename or ""
     _, ext = os.path.splitext(filename)
     if ext.lower() not in ALLOWED_EXTENSIONS:
@@ -470,14 +475,12 @@ async def upload_file(
         )
 
     try:
-        file_extension = ext # 使用刚才提取的扩展名
+        file_extension = ext 
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         user_upload_directory = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
         os.makedirs(user_upload_directory, exist_ok=True)
         file_location = os.path.normpath(os.path.join(user_upload_directory, unique_filename))
 
-        # 3. 流式写入并实时检查大小 (精准控制)
-        # 防止用户伪造 Content-Length header 或者使用分块传输绕过检查
         current_size = 0
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
@@ -487,8 +490,8 @@ async def upload_file(
                 
                 current_size += len(chunk)
                 if current_size > MAX_UPLOAD_SIZE:
-                    # 超过限制：停止写入，关闭文件，删除部分文件，抛出异常
-                    await out_f.close() # 显式关闭
+                    # 超过限制：停止写入，显式关闭文件句柄，删除部分文件，抛出异常
+                    await out_f.close() 
                     if os.path.exists(file_location):
                         os.remove(file_location)
                     raise HTTPException(
@@ -536,5 +539,8 @@ async def upload_file(
     except Exception as e:
         # 清理垃圾文件
         if 'file_location' in locals() and os.path.exists(file_location):
-            os.remove(file_location)
+            try:
+                os.remove(file_location)
+            except OSError:
+                pass
         raise HTTPException(status_code=500, detail=f"Could not upload file: {str(e)}")
