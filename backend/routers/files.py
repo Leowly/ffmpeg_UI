@@ -9,15 +9,20 @@ from typing import List, Tuple
 import shlex
 
 import aiofiles
-from fastapi import (APIRouter, Depends, HTTPException,UploadFile,)
+from fastapi import (APIRouter, Depends, HTTPException, UploadFile, Request, status)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..dependencies import get_current_user, get_db
 from ..processing import manager, user_task_queues
-from ..config import UPLOAD_DIRECTORY, reconstruct_file_path, ENABLE_HW_ACCEL_DETECTION
-
+from ..config import (
+    UPLOAD_DIRECTORY, 
+    reconstruct_file_path, 
+    ENABLE_HW_ACCEL_DETECTION,
+    MAX_UPLOAD_SIZE,
+    ALLOWED_EXTENSIONS
+)
 router = APIRouter(
     tags=["Files"],
 )
@@ -435,22 +440,62 @@ async def delete_user_file(
 
 @router.post("/upload", response_model=schemas.FileResponseForFrontend)
 async def upload_file(
+    request: Request,  # <--- 新增 Request 参数
     file: UploadFile,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. 检查 Content-Length (快速拒绝)
+    # 注意：header 中的 content-length 是整个请求体的大小（包含文件名、边界符等），
+    # 会略大于文件实际大小，但这作为第一道防线非常有效。
+    content_length = request.headers.get('content-length')
+    if content_length:
+        try:
+            if int(content_length) > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"文件过大。限制为 {MAX_UPLOAD_SIZE / (1024*1024):.2f} MB"
+                )
+        except ValueError:
+            pass # 如果 header 格式不对，忽略，交给流式检查
+
+    # 2. 检查文件扩展名
+    # os.path.splitext 可能无法正确处理文件名中没有点的情况，做个简单判断
+    filename = file.filename or ""
+    _, ext = os.path.splitext(filename)
+    if ext.lower() not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的文件格式: {ext}。仅支持常见的音视频文件。"
+        )
+
     try:
-        file_extension = os.path.splitext(file.filename)[1]
+        file_extension = ext # 使用刚才提取的扩展名
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         user_upload_directory = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
         os.makedirs(user_upload_directory, exist_ok=True)
         file_location = os.path.normpath(os.path.join(user_upload_directory, unique_filename))
 
+        # 3. 流式写入并实时检查大小 (精准控制)
+        # 防止用户伪造 Content-Length header 或者使用分块传输绕过检查
+        current_size = 0
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
-                chunk = await file.read(1024 * 1024)
+                chunk = await file.read(1024 * 1024) # 1MB chunk
                 if not chunk:
                     break
+                
+                current_size += len(chunk)
+                if current_size > MAX_UPLOAD_SIZE:
+                    # 超过限制：停止写入，关闭文件，删除部分文件，抛出异常
+                    await out_f.close() # 显式关闭
+                    if os.path.exists(file_location):
+                        os.remove(file_location)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"文件实际大小超过限制 ({MAX_UPLOAD_SIZE / (1024*1024):.2f} MB)"
+                    )
+                
                 await out_f.write(chunk)
 
         loop = asyncio.get_running_loop()
@@ -461,7 +506,7 @@ async def upload_file(
                 return crud.create_user_file(
                     db=db,
                     file=schemas.FileCreate(
-                        filename=file.filename,
+                        filename=filename, # 使用原始文件名
                         filepath=file_location,
                         status="uploaded"
                     ),
@@ -473,9 +518,6 @@ async def upload_file(
             if os.path.exists(file_location):
                 os.remove(file_location)
             raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
-        # Optionally clear cache when a new file is uploaded
-        # invalidate_file_path_cache()
 
         return schemas.FileResponseForFrontend(
             uid=str(db_file.id),
@@ -489,5 +531,10 @@ async def upload_file(
                 temp_path=db_file.filepath,
             ),
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
+        # 清理垃圾文件
+        if 'file_location' in locals() and os.path.exists(file_location):
+            os.remove(file_location)
+        raise HTTPException(status_code=500, detail=f"Could not upload file: {str(e)}")
