@@ -75,6 +75,7 @@ async def upload_file(
 
         current_size = 0
         first_chunk = True
+        first_chunk_data = None
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
                 chunk = await file.read(1024 * 1024)
@@ -82,6 +83,7 @@ async def upload_file(
                     break
 
                 if first_chunk:
+                    first_chunk_data = chunk
                     is_valid, error_msg = await validate_file_type(chunk, ext.lower())
                     if not is_valid:
                         await out_f.close()
@@ -104,6 +106,14 @@ async def upload_file(
                     )
 
                 await out_f.write(chunk)
+
+        if current_size == 0:
+            if os.path.exists(file_location):
+                os.remove(file_location)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件为空或无法读取",
+            )
 
         loop = asyncio.get_running_loop()
         file_size = await loop.run_in_executor(None, os.path.getsize, file_location)

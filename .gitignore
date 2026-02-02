@@ -3,3 +3,5 @@ gha-creds-*.json
 pack_sources.bat
 package.txt
 AGENTS.md
+nul
+test_upload.db
