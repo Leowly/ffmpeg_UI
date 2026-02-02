@@ -71,6 +71,7 @@
       </a-button>
     </div>
   </div>
+  <div class="bottom-spacer"></div>
 </template>
 
 <script setup lang="ts">
@@ -210,6 +211,10 @@ const goToFileAndDownload = () => {
   flex-direction: column;
   padding: 16px;
   overflow-y: auto;
+}
+
+.bottom-spacer {
+  height: 40px; /* 预留给左下角浮动按钮的空间 */
 }
 
 .task-header {

@@ -76,7 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
           let msg = '服务器错误'
 
           if (data.message) {
-            msg = data.message // 你的 APIResponse 格式
+            msg = data.message as string // 你的 APIResponse 格式
           } else if (data.detail) {
             // FastAPI 默认错误格式
             msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
