@@ -14,6 +14,7 @@ export interface UserFile {
   name: string
   status: 'done' | 'uploading' | 'error' | 'processing' | 'processed'
   size: number
+  uploadProgress: number
   response: {
     file_id: string
     original_name: string
@@ -197,6 +198,24 @@ export const useFileStore = defineStore('file', () => {
     if (!fileList.value.some((f) => f.id === file.id)) {
       fileList.value.push(file)
     }
+  }
+
+  function updateFileProgress(fileId: string, progress: number) {
+    const file = fileList.value.find((f) => f.uid === fileId || f.id === fileId)
+    if (file) {
+      file.uploadProgress = progress
+    }
+  }
+
+  function updateFileStatus(fileId: string, status: UserFile['status']) {
+    const file = fileList.value.find((f) => f.uid === fileId || f.id === fileId)
+    if (file) {
+      file.status = status
+    }
+  }
+
+  function removeUploadingFile(fileUid: string) {
+    fileList.value = fileList.value.filter((f) => f.uid !== fileUid)
   }
 
   async function fetchSingleTaskAndUpdate(taskId: number) {
@@ -442,8 +461,11 @@ export const useFileStore = defineStore('file', () => {
     downloadFile,
     checkAndReconnectWebSockets,
     fetchSingleTaskAndUpdate,
-    systemCapabilities, // 导出状态
-    fetchSystemCapabilities, // 导出方法
-    resetStore, // 导出此方法
+    systemCapabilities,
+    fetchSystemCapabilities,
+    resetStore,
+    updateFileProgress,
+    updateFileStatus,
+    removeUploadingFile,
   }
 })

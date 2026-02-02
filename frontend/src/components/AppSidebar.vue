@@ -89,7 +89,18 @@
           class="file-item"
         >
           <template #actions>
+            <a-spin v-if="item.status === 'uploading'" :indicator="progressIndicator(item)" />
             <a-popconfirm
+              v-if="item.status === 'uploading'"
+              title="确定要取消上传吗？"
+              ok-text="确定"
+              cancel-text="取消"
+              @confirm="handleCancelUpload(item.uid)"
+            >
+              <a @click.stop><close-outlined /></a>
+            </a-popconfirm>
+            <a-popconfirm
+              v-else
               title="确定要删除这个文件吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -120,8 +131,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useFileStore, type Task } from '@/stores/fileStore'
+import { ref, computed, watch, h } from 'vue'
+import { useFileStore, type Task, type UserFile } from '@/stores/fileStore'
 import { useAuthStore } from '@/stores/authStore'
 import { API_ENDPOINTS } from '@/api'
 import { message, type UploadChangeParam, type UploadFile } from 'ant-design-vue'
@@ -133,6 +144,7 @@ import {
   DeleteOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  CloseOutlined,
 } from '@ant-design/icons-vue'
 
 const emit = defineEmits(['task-selected', 'file-selected'])
@@ -164,13 +176,17 @@ const uploadHeaders = computed(() => ({
  * 处理文件上传状态的变化
  */
 const handleUploadChange = (info: UploadChangeParam) => {
-  if (info.file.status === 'done') {
+  if (info.file.status === 'uploading') {
+    const percent = info.file.percent || 0
+    fileStore.updateFileProgress(info.file.uid, Math.round(percent))
+  } else if (info.file.status === 'done') {
     message.success(`${info.file.name} 文件上传成功`)
-    // 调用 store 的 action 来添加文件，保持状态统一
+    fileStore.updateFileStatus(info.file.uid, 'done')
     fileStore.addFile(info.file.response)
   } else if (info.file.status === 'error') {
     const errorMsg = info.file.response?.detail || '网络错误'
     message.error(`${info.file.name} 文件上传失败: ${errorMsg}`)
+    fileStore.updateFileStatus(info.file.uid, 'error')
   }
 }
 
@@ -204,7 +220,66 @@ const beforeUpload = (file: UploadFile) => {
     return false
   }
 
+  const tempFile: UserFile = {
+    uid: file.uid,
+    id: file.uid,
+    name: file.name || '未知文件',
+    status: 'uploading',
+    size: file.size || 0,
+    uploadProgress: 0,
+    response: {
+      file_id: '',
+      original_name: file.name || '',
+      temp_path: '',
+    },
+  }
+  fileStore.addFile(tempFile)
+
   return true
+}
+
+const progressIndicator = (item: UserFile) => {
+  return h('div', { class: 'upload-progress-circle' }, [
+    h(
+      'svg',
+      { viewBox: '0 0 36 36', class: 'progress-ring' },
+      {
+        default: () => [
+          h('path', {
+            d: 'M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831',
+            stroke: '#e6e6e6',
+            'stroke-width': '3',
+            fill: 'none',
+          }),
+          h('path', {
+            d: 'M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831',
+            stroke: '#1890ff',
+            'stroke-width': '3',
+            fill: 'none',
+            'stroke-dasharray': `${item.uploadProgress}, 100`,
+          }),
+        ],
+      },
+    ),
+    h('span', { class: 'progress-text' }, `${item.uploadProgress}%`),
+  ])
+}
+
+interface UploadInstance {
+  file?: { uid?: string }
+  abort?: () => void
+}
+
+const handleCancelUpload = (fileUid: string) => {
+  fileStore.removeUploadingFile(fileUid)
+  const uploadInstances = (window as unknown as { __uploadInstances?: UploadInstance[] }).__uploadInstances
+  const uploadInstance = uploadInstances?.find(
+    (instance) => instance.file?.uid === fileUid,
+  )
+  if (uploadInstance) {
+    uploadInstance.abort?.()
+  }
+  message.info('上传已取消')
 }
 
 /**
@@ -359,5 +434,31 @@ const getTaskDescription = (task: Task): string => {
   .sidebar-container :deep(.ant-upload-text) {
     font-size: 14px;
   }
+}
+
+.upload-progress-circle {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.progress-ring {
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+}
+
+.progress-ring path:nth-child(2) {
+  transition: stroke-dasharray 0.3s ease;
+}
+
+.progress-text {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 500;
+  color: #1890ff;
 }
 </style>

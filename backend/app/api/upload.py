@@ -24,9 +24,11 @@ router = APIRouter(
 
 
 def validate_file_signature(content: bytes, extension: str) -> bool:
+    check_range = content[:100] if len(content) > 100 else content
     for sig, exts in FILE_SIGNATURES.items():
-        if content.startswith(sig):
-            return extension.lower() in exts
+        if sig in check_range:
+            ext_name = extension.lstrip(".")
+            return ext_name in exts
     return False
 
 
@@ -36,9 +38,6 @@ async def validate_file_type(content: bytes, extension: str) -> tuple[bool, str]
     return True, ""
 
 
-MAX_UPLOAD_SIZE_MB = MAX_UPLOAD_SIZE / (1024 * 1024)
-
-
 @router.post("/upload", response_model=schemas.FileResponseForFrontend)
 async def upload_file(
     request: Request,
@@ -46,7 +45,6 @@ async def upload_file(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # --- [第一道防线] 检查 Content-Length ---
     content_length = request.headers.get("content-length")
     if content_length:
         try:
@@ -58,7 +56,6 @@ async def upload_file(
         except ValueError:
             pass
 
-    # --- [第二道防线] 检查文件扩展名 ---
     filename = file.filename or ""
     _, ext = os.path.splitext(filename)
     if ext.lower() not in ALLOWED_EXTENSIONS:
@@ -78,10 +75,9 @@ async def upload_file(
 
         current_size = 0
         first_chunk = True
-        header_validated = False
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
-                chunk = await file.read(1024 * 1024)  # 1MB chunk
+                chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
 
@@ -95,7 +91,6 @@ async def upload_file(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=error_msg,
                         )
-                    header_validated = True
                     first_chunk = False
 
                 current_size += len(chunk)

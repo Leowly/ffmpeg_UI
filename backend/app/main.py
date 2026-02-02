@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
 
+# 配置日志
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from . import models, crud
@@ -56,11 +63,6 @@ app.include_router(tasks.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-
     # Clean up stale tasks that were left in processing/pending state due to server restart
     db = SessionLocal()
     try:

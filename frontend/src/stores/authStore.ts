@@ -72,7 +72,7 @@ export const useAuthStore = defineStore('auth', () => {
             return false; // 明确返回 false
           }
 
-          const data = error.response.data as any // 临时设为 any 以便检查属性
+          const data = error.response.data as unknown as Record<string, unknown>
           let msg = '服务器错误'
 
           if (data.message) {

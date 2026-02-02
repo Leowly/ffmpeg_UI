@@ -113,7 +113,7 @@ ALLOWED_EXTENSIONS = {
 }
 
 FILE_SIGNATURES = {
-    b"\x00\x00\x00": {"mp4", "m4v", "mov"},
+    b"ftyp": {"mp4", "m4v", "mov"},  # ftyp atom, 位置通常在偏移 4
     b"PK\x03\x04": {"mkv"},
     b"\xff\xd8\xff": {"jpg", "jpeg"},
     b"\x89PNG\r\n\x1a\n": {"png"},
