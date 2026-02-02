@@ -3,7 +3,6 @@
 import asyncio
 import os
 import uuid
-
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, Request, status
 from sqlalchemy.orm import Session
@@ -16,11 +15,28 @@ from ..core.config import (
     UPLOAD_DIRECTORY,
     MAX_UPLOAD_SIZE,
     ALLOWED_EXTENSIONS,
+    FILE_SIGNATURES,
 )
 
 router = APIRouter(
     tags=["Files"],
 )
+
+
+def validate_file_signature(content: bytes, extension: str) -> bool:
+    for sig, exts in FILE_SIGNATURES.items():
+        if content.startswith(sig):
+            return extension.lower() in exts
+    return False
+
+
+async def validate_file_type(content: bytes, extension: str) -> tuple[bool, str]:
+    if not validate_file_signature(content, extension):
+        return False, "文件内容与扩展名不匹配"
+    return True, ""
+
+
+MAX_UPLOAD_SIZE_MB = MAX_UPLOAD_SIZE / (1024 * 1024)
 
 
 @router.post("/upload", response_model=schemas.FileResponseForFrontend)
@@ -61,11 +77,26 @@ async def upload_file(
         )
 
         current_size = 0
+        first_chunk = True
+        header_validated = False
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
                 chunk = await file.read(1024 * 1024)  # 1MB chunk
                 if not chunk:
                     break
+
+                if first_chunk:
+                    is_valid, error_msg = await validate_file_type(chunk, ext.lower())
+                    if not is_valid:
+                        await out_f.close()
+                        if os.path.exists(file_location):
+                            os.remove(file_location)
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=error_msg,
+                        )
+                    header_validated = True
+                    first_chunk = False
 
                 current_size += len(chunk)
                 if current_size > MAX_UPLOAD_SIZE:

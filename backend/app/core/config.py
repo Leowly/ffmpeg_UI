@@ -13,9 +13,12 @@ ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 # 读取环境变量，默认为 True
-ENABLE_HW_ACCEL_DETECTION = os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower() == "true"
+ENABLE_HW_ACCEL_DETECTION = (
+    os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower() == "true"
+)
 
 UPLOAD_DIRECTORY = "./backend/workspaces"
+
 
 # --- 新增：文件大小解析逻辑 ---
 def parse_size_to_bytes(size_str: str | int | None) -> int:
@@ -25,7 +28,7 @@ def parse_size_to_bytes(size_str: str | int | None) -> int:
     """
     if size_str is None:
         return 2 * 1024 * 1024 * 1024  # 默认 2GB
-    
+
     # 如果已经是数字（int），直接返回
     if isinstance(size_str, int):
         return size_str
@@ -35,22 +38,25 @@ def parse_size_to_bytes(size_str: str | int | None) -> int:
         return int(s)
 
     # 正则匹配 数字 + 单位
-    match = re.match(r'^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$', s)
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$", s)
     if not match:
-        print(f"Warning: Invalid MAX_UPLOAD_SIZE format '{size_str}', defaulting to 2GB.")
+        print(
+            f"Warning: Invalid MAX_UPLOAD_SIZE format '{size_str}', defaulting to 2GB."
+        )
         return 2 * 1024 * 1024 * 1024
 
     number = float(match.group(1))
     unit = match.group(2)
 
-    if 'G' in unit:
+    if "G" in unit:
         return int(number * 1024 * 1024 * 1024)
-    elif 'M' in unit:
+    elif "M" in unit:
         return int(number * 1024 * 1024)
-    elif 'K' in unit:
+    elif "K" in unit:
         return int(number * 1024)
     else:
         return int(number)
+
 
 # 获取配置的最大上传限制
 MAX_UPLOAD_SIZE = parse_size_to_bytes(os.environ.get("MAX_UPLOAD_SIZE"))
@@ -58,16 +64,70 @@ MAX_UPLOAD_SIZE = parse_size_to_bytes(os.environ.get("MAX_UPLOAD_SIZE"))
 # --- 新增：FFmpeg 支持的常见文件扩展名 ---
 # 这是一个非常全面的列表，涵盖了视频、音频和部分图像序列格式
 ALLOWED_EXTENSIONS = {
-    # Video Formats
-    '.mp4', '.m4v', '.mov', '.mkv', '.webm', '.flv', '.avi', '.wmv', 
-    '.mpg', '.mpeg', '.m2ts', '.mts', '.ts', '.vob', '.3gp', '.3g2',
-    '.ogv', '.rm', '.rmvb', '.asf', '.divx', '.f4v', '.h264', '.hevc',
-    # Audio Formats
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma', '.opus',
-    '.alac', '.aiff', '.ape', '.ac3', '.dts', '.pcm', '.amr',
-    # Image/Sequence Formats (FFmpeg can process these)
-    '.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".flv",
+    ".avi",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
+    ".m2ts",
+    ".mts",
+    ".ts",
+    ".vob",
+    ".3gp",
+    ".3g2",
+    ".ogv",
+    ".rm",
+    ".rmvb",
+    ".asf",
+    ".divx",
+    ".f4v",
+    ".h264",
+    ".hevc",
+    ".mp3",
+    ".aac",
+    ".flac",
+    ".wav",
+    ".ogg",
+    ".m4a",
+    ".wma",
+    ".opus",
+    ".alac",
+    ".aiff",
+    ".ape",
+    ".ac3",
+    ".dts",
+    ".pcm",
+    ".amr",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".bmp",
+    ".gif",
+    ".tiff",
+    ".webp",
 }
+
+FILE_SIGNATURES = {
+    b"\x00\x00\x00": {"mp4", "m4v", "mov"},
+    b"PK\x03\x04": {"mkv"},
+    b"\xff\xd8\xff": {"jpg", "jpeg"},
+    b"\x89PNG\r\n\x1a\n": {"png"},
+    b"RIFF": {"avi", "webm", "mkv", "wave"},
+    b"OggS": {"ogg", "ogv", "opus"},
+    b"ID3": {"mp3"},
+    b"\xff\xfb": {"mp3"},
+    b"\xff\xf3": {"mp3"},
+    b"\xff\xf5": {"mp3"},
+    b"fLaC": {"flac"},
+    b"MThd": {"mid", "midi"},
+    b"\x1aE\xdf\xa3": {"webm", "mkv"},
+}
+
 
 @lru_cache(maxsize=128)
 def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:

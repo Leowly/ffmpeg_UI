@@ -9,6 +9,7 @@
         :show-upload-list="false"
         :action="uploadUrl"
         :headers="uploadHeaders"
+        :before-upload="beforeUpload"
         @change="handleUploadChange"
         @drop="handleDrop"
       >
@@ -178,6 +179,32 @@ const handleUploadChange = (info: UploadChangeParam) => {
  */
 const handleDrop = (e: DragEvent) => {
   console.log('Files dropped:', e)
+}
+
+const ALLOWED_EXTENSIONS = [
+  '.mp4', '.m4v', '.mov', '.mkv', '.webm', '.flv', '.avi', '.wmv',
+  '.mpg', '.mpeg', '.m2ts', '.mts', '.ts', '.vob', '.3gp', '.3g2',
+  '.ogv', '.rm', '.rmvb', '.asf', '.divx', '.f4v', '.h264', '.hevc',
+  '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma', '.opus',
+  '.alac', '.aiff', '.ape', '.ac3', '.dts', '.pcm', '.amr',
+]
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 // 2GB
+
+const beforeUpload = (file: UploadFile) => {
+  const ext = '.' + (file.name?.split('.').pop() || '').toLowerCase()
+
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    message.error(`不支持的文件格式: ${ext}`)
+    return false
+  }
+
+  if (file.size !== undefined && file.size > MAX_FILE_SIZE) {
+    message.error(`文件大小不能超过 2GB`)
+    return false
+  }
+
+  return true
 }
 
 /**
