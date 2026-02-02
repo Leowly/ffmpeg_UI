@@ -9,7 +9,7 @@ os.environ["ENABLE_HARDWARE_ACCELERATION_DETECTION"] = "true"
 
 import pytest
 from unittest.mock import patch
-from app.api.files import construct_ffmpeg_command
+from app.api.process import construct_ffmpeg_command
 from app import schemas
 
 
@@ -47,7 +47,7 @@ def test_cpu_basic_encoding():
     )
 
     # Mock 掉检测函数
-    with patch("app.api.files.detect_video_codec", return_value="h264"):
+    with patch("app.api.process.detect_video_codec", return_value="h264"):
         cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
 
     cmd_str = " ".join(cmd)
@@ -59,8 +59,8 @@ def test_cpu_basic_encoding():
     assert "-c:a aac" in cmd_str
 
 
-@patch("app.api.files.detect_hardware_encoder")
-@patch("app.api.files.detect_video_codec")
+@patch("app.api.process.detect_hardware_encoder")
+@patch("app.api.process.detect_video_codec")
 def test_nvidia_standard_encoding(mock_video_codec, mock_hw_encoder):
     """测试 2: NVIDIA 标准 H264 输入 -> H264 输出 (应开启零拷贝)"""
     mock_hw_encoder.return_value = "nvidia"
@@ -80,8 +80,8 @@ def test_nvidia_standard_encoding(mock_video_codec, mock_hw_encoder):
     assert "-preset p4" in cmd_str  # balanced 对应 Nvidia 的 p4
 
 
-@patch("app.api.files.detect_hardware_encoder")
-@patch("app.api.files.detect_video_codec")
+@patch("app.api.process.detect_hardware_encoder")
+@patch("app.api.process.detect_video_codec")
 def test_nvidia_av1_input_hybrid_mode(mock_video_codec, mock_hw_encoder):
     """测试 3: NVIDIA AV1 输入处理 (当前实现仍使用 CUDA 硬解)"""
     mock_hw_encoder.return_value = "nvidia"
@@ -105,8 +105,8 @@ def test_nvidia_av1_input_hybrid_mode(mock_video_codec, mock_hw_encoder):
     # 这是现有实现的行为，需要单独修复实现逻辑。
 
 
-@patch("app.api.files.detect_hardware_encoder")
-@patch("app.api.files.detect_video_codec")
+@patch("app.api.process.detect_hardware_encoder")
+@patch("app.api.process.detect_video_codec")
 def test_nvidia_scaling_logic(mock_video_codec, mock_hw_encoder):
     """测试 4: NVIDIA 缩放逻辑 (Zero-Copy时用 GPU 滤镜)"""
     mock_hw_encoder.return_value = "nvidia"
@@ -125,8 +125,8 @@ def test_nvidia_scaling_logic(mock_video_codec, mock_hw_encoder):
     # 这是现有实现的行为，需要单独修复实现逻辑。
 
 
-@patch("app.api.files.detect_hardware_encoder")
-@patch("app.api.files.detect_video_codec")
+@patch("app.api.process.detect_hardware_encoder")
+@patch("app.api.process.detect_video_codec")
 def test_cpu_fallback_preset_logic(mock_video_codec, mock_hw_encoder):
     """测试 5: 当硬件不支持时回退到 CPU，Preset 不应报错 (不能出现 p1)"""
     # 模拟用户开启了硬件加速，但是 detect_hardware_encoder 返回 None (没显卡)
@@ -152,7 +152,7 @@ def test_audio_extraction():
     """测试 6: 纯音频提取"""
     payload = create_payload(container="mp3", audioCodec="libmp3lame")
 
-    with patch("app.api.files.detect_video_codec", return_value="h264"):
+    with patch("app.api.process.detect_video_codec", return_value="h264"):
         cmd = construct_ffmpeg_command("input.mp4", "output.mp3", payload)
 
     cmd_str = " ".join(cmd)
@@ -162,8 +162,8 @@ def test_audio_extraction():
     assert "-c:v" not in cmd_str  # 不应包含视频编码器参数
 
 
-@patch("app.api.files.detect_hardware_encoder")
-@patch("app.api.files.detect_video_codec")
+@patch("app.api.process.detect_hardware_encoder")
+@patch("app.api.process.detect_video_codec")
 def test_intel_qsv_encoding(mock_video_codec, mock_hw_encoder):
     """测试 7: Intel QSV 编码"""
     mock_hw_encoder.return_value = "intel"
