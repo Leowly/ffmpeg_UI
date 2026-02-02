@@ -1,4 +1,4 @@
-# backend/routers/files.py
+# backend/app/api/files.py
 
 import asyncio
 import json
@@ -9,45 +9,47 @@ from typing import List, Tuple
 import shlex
 
 import aiofiles
-from fastapi import (
-    APIRouter, 
-    Depends, 
-    HTTPException, 
-    UploadFile, 
-    Request,      # 用于获取请求头
-    status        # 用于状态码
-)
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from .. import crud, models, schemas
-from ..dependencies import get_current_user, get_db
-from ..processing import manager, user_task_queues
-from ..config import (
-    UPLOAD_DIRECTORY, 
-    reconstruct_file_path, 
+from ..crud import crud
+from ..models import models
+from ..schemas import schemas
+from ..core.deps import get_current_user, get_db
+from ..services.processing import manager, user_task_queues
+from ..core.config import (
+    UPLOAD_DIRECTORY,
+    reconstruct_file_path,
     ENABLE_HW_ACCEL_DETECTION,
-    MAX_UPLOAD_SIZE,      # 最大限制
-    ALLOWED_EXTENSIONS    # 允许的扩展名
+    MAX_UPLOAD_SIZE,
+    ALLOWED_EXTENSIONS,
 )
 
 router = APIRouter(
     tags=["Files"],
 )
 
+
 def detect_video_codec(input_path: str) -> str:
     try:
         cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name",
-            "-of", "default=nw=1:nk=1",
-            input_path
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=nw=1:nk=1",
+            input_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result.stdout.strip()
     except Exception:
         return ""
+
 
 def detect_hardware_encoder() -> str | None:
     """
@@ -60,9 +62,7 @@ def detect_hardware_encoder() -> str | None:
     try:
         # 获取所有可用编码器
         result = subprocess.run(
-            ["ffmpeg", "-v", "quiet", "-encoders"],
-            capture_output=True,
-            text=True
+            ["ffmpeg", "-v", "quiet", "-encoders"], capture_output=True, text=True
         )
         output = result.stdout
 
@@ -81,21 +81,24 @@ def detect_hardware_encoder() -> str | None:
 
     return None
 
+
 @router.get("/capabilities", response_model=schemas.SystemCapabilities)
 async def get_system_capabilities(
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
 ):
-    hw_type = await asyncio.get_running_loop().run_in_executor(None, detect_hardware_encoder)
-    return schemas.SystemCapabilities(
-        has_hardware_acceleration=bool(hw_type),
-        hardware_type=hw_type
+    hw_type = await asyncio.get_running_loop().run_in_executor(
+        None, detect_hardware_encoder
     )
+    return schemas.SystemCapabilities(
+        has_hardware_acceleration=bool(hw_type), hardware_type=hw_type
+    )
+
 
 @router.get("/file-info", response_model=schemas.FileInfoResponse)
 async def get_file_info(
     filename: str,
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
         file_id = int(filename)
@@ -116,13 +119,23 @@ async def get_file_info(
 
     def run_ffprobe_sync(path: str) -> Tuple[int, str, str]:
         command = [
-            "ffprobe", "-v", "quiet", "-print_format", "json",
-            "-show_format", "-show_streams", path,
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            path,
         ]
         try:
             result = subprocess.run(
-                command, capture_output=True, text=True, errors='ignore',
-                check=False, creationflags=0,
+                command,
+                capture_output=True,
+                text=True,
+                errors="ignore",
+                check=False,
+                creationflags=0,
             )
             return result.returncode, result.stdout, result.stderr
         except FileNotFoundError:
@@ -142,17 +155,21 @@ async def get_file_info(
             clean_data = schemas.FileInfoResponse.model_validate(raw_data)
             return clean_data
         except (json.JSONDecodeError, Exception):
-            raise HTTPException(status_code=500, detail="Could not parse ffprobe output")
+            raise HTTPException(
+                status_code=500, detail="Could not parse ffprobe output"
+            )
 
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="ffprobe command not found.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"An unexpected error occurred: {e}"
+        )
+
 
 @router.get("/files", response_model=List[schemas.FileResponseForFrontend])
 async def read_user_files(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     db_files = crud.get_user_files(db, user_id=current_user.id)
     response_files = []
@@ -166,32 +183,39 @@ async def read_user_files(
         if exists:
             resolved_file_path = current_file_path
         else:
-            resolved_candidate = await loop.run_in_executor(None, reconstruct_file_path, current_file_path, current_user.id)
+            resolved_candidate = await loop.run_in_executor(
+                None, reconstruct_file_path, current_file_path, current_user.id
+            )
             if resolved_candidate:
                 resolved_file_path = resolved_candidate
 
         if resolved_file_path:
-            file_size = await loop.run_in_executor(None, os.path.getsize, resolved_file_path)
-            response_files.append(schemas.FileResponseForFrontend(
-                uid=str(db_file.id),
-                id=str(db_file.id),
-                name=db_file.filename,
-                status=db_file.status,
-                size=file_size,
-                response=schemas.FileResponseInner(
-                    file_id=str(db_file.id),
-                    original_name=db_file.filename,
-                    temp_path=resolved_file_path
+            file_size = await loop.run_in_executor(
+                None, os.path.getsize, resolved_file_path
+            )
+            response_files.append(
+                schemas.FileResponseForFrontend(
+                    uid=str(db_file.id),
+                    id=str(db_file.id),
+                    name=db_file.filename,
+                    status=db_file.status,
+                    size=file_size,
+                    response=schemas.FileResponseInner(
+                        file_id=str(db_file.id),
+                        original_name=db_file.filename,
+                        temp_path=resolved_file_path,
+                    ),
                 )
-            ))
+            )
 
     return response_files
+
 
 @router.get("/download-file/{file_id}")
 async def download_file(
     file_id: str,
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
         file_id_int = int(file_id)
@@ -204,7 +228,9 @@ async def download_file(
 
     file_path = db_file.filepath
     loop = asyncio.get_running_loop()
-    resolved = await loop.run_in_executor(None, reconstruct_file_path, file_path, current_user.id)
+    resolved = await loop.run_in_executor(
+        None, reconstruct_file_path, file_path, current_user.id
+    )
     if resolved:
         file_path = resolved
     else:
@@ -219,59 +245,84 @@ async def download_file(
                 yield chunk
 
     headers = {"Content-Disposition": f'attachment; filename="{db_file.filename}"'}
-    return StreamingResponse(file_iterator(file_path), media_type="application/octet-stream", headers=headers)
+    return StreamingResponse(
+        file_iterator(file_path), media_type="application/octet-stream", headers=headers
+    )
 
-def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.ProcessPayload) -> list:
+
+def construct_ffmpeg_command(
+    input_path: str, output_path: str, params: schemas.ProcessPayload
+) -> list:
     # 1. 基础参数准备
     video_codec = params.videoCodec
     audio_codec = params.audioCodec
     container = params.container
-    
+
     # 仅当用户开启硬件加速开关时，才去检测硬件类型
     hw_type = detect_hardware_encoder() if params.useHardwareAcceleration else None
     # 2. 确定视频编码器 (输出端)
-    if params.useHardwareAcceleration and video_codec != 'copy':
-        if hw_type == 'nvidia':
-            if video_codec == 'libx264': video_codec = 'h264_nvenc'
-            elif video_codec == 'libx265': video_codec = 'hevc_nvenc'
-            elif video_codec == 'libaom-av1': video_codec = 'av1_nvenc'
-        elif hw_type == 'intel':
-            if video_codec == 'libx264': video_codec = 'h264_qsv'
-            elif video_codec == 'libx265': video_codec = 'hevc_qsv'
-        elif hw_type == 'amd':
-            if video_codec == 'libx264': video_codec = 'h264_amf'
-            elif video_codec == 'libx265': video_codec = 'hevc_amf'
-        elif hw_type == 'mac':
-            if video_codec == 'libx264': video_codec = 'h264_videotoolbox'
-            elif video_codec == 'libx265': video_codec = 'hevc_videotoolbox'
+    if params.useHardwareAcceleration and video_codec != "copy":
+        if hw_type == "nvidia":
+            if video_codec == "libx264":
+                video_codec = "h264_nvenc"
+            elif video_codec == "libx265":
+                video_codec = "hevc_nvenc"
+            elif video_codec == "libaom-av1":
+                video_codec = "av1_nvenc"
+        elif hw_type == "intel":
+            if video_codec == "libx264":
+                video_codec = "h264_qsv"
+            elif video_codec == "libx265":
+                video_codec = "hevc_qsv"
+        elif hw_type == "amd":
+            if video_codec == "libx264":
+                video_codec = "h264_amf"
+            elif video_codec == "libx265":
+                video_codec = "hevc_amf"
+        elif hw_type == "mac":
+            if video_codec == "libx264":
+                video_codec = "h264_videotoolbox"
+            elif video_codec == "libx265":
+                video_codec = "hevc_videotoolbox"
 
-    is_audio_only_output = container in ['mp3', 'flac', 'wav', 'aac', 'ogg']
+    is_audio_only_output = container in ["mp3", "flac", "wav", "aac", "ogg"]
 
     # 3. 容器兼容性检查
-    if not is_audio_only_output and video_codec != 'copy':
-        is_hw_codec = any(k in video_codec for k in ['nvenc', 'qsv', 'amf', 'videotoolbox'])
+    if not is_audio_only_output and video_codec != "copy":
+        is_hw_codec = any(
+            k in video_codec for k in ["nvenc", "qsv", "amf", "videotoolbox"]
+        )
         if not is_hw_codec:
-            if container == 'mp4' and video_codec not in ['libx264', 'libx265', 'libaom-av1']:
-                video_codec = 'libx264'
-            elif container == 'mkv' and video_codec not in ['libx264', 'libx265', 'libaom-av1', 'vp9']:
-                video_codec = 'libx264'
-            elif container == 'mov' and video_codec not in ['libx264', 'libx265']:
-                video_codec = 'libx264'
+            if container == "mp4" and video_codec not in [
+                "libx264",
+                "libx265",
+                "libaom-av1",
+            ]:
+                video_codec = "libx264"
+            elif container == "mkv" and video_codec not in [
+                "libx264",
+                "libx265",
+                "libaom-av1",
+                "vp9",
+            ]:
+                video_codec = "libx264"
+            elif container == "mov" and video_codec not in ["libx264", "libx265"]:
+                video_codec = "libx264"
 
     # 音频编码器逻辑
-    if audio_codec != 'copy':
-        if container in ['mp4', 'mov'] and audio_codec not in ['aac', 'mp3']:
-            audio_codec = 'aac'
-        elif container == 'mkv' and audio_codec not in ['aac', 'mp3', 'opus', 'flac']:
-            audio_codec = 'aac'
-        elif container == 'mp3':
-            audio_codec = 'libmp3lame'
-        elif container == 'flac':
-            audio_codec = 'flac'
-        elif container == 'aac':
-            audio_codec = 'aac'
-        elif container == 'wav':
-            audio_codec = 'pcm_s16le'
+    if audio_codec != "copy":
+        if container in ["mp4", "mov"] and audio_codec not in ["aac", "mp3"]:
+            audio_codec = "aac"
+        elif container == "mkv" and audio_codec not in ["aac", "mp3", "opus", "flac"]:
+            audio_codec = "aac"
+        elif container == "mp3":
+            audio_codec = "libmp3lame"
+        elif container == "flac":
+            audio_codec = "flac"
+        elif container == "aac":
+            audio_codec = "aac"
+        elif container == "wav":
+            audio_codec = "pcm_s16le"
 
     # 4. 构建命令行
     command = ["ffmpeg", "-y"]
@@ -282,10 +333,10 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         enable_input_hw_accel = True
 
         if enable_input_hw_accel:
-            if hw_type == 'nvidia':
+            if hw_type == "nvidia":
                 # 开启 CUDA 硬件加速和零拷贝
                 command.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
-            elif hw_type == 'intel':
+            elif hw_type == "intel":
                 command.extend(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"])
             # 其他平台视情况而定
 
@@ -312,37 +363,59 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
         if video_codec != "copy":
             command.extend(["-c:v", video_codec])
 
-            actual_hw_type = 'cpu'
-            if 'nvenc' in video_codec: actual_hw_type = 'nvidia'
-            elif 'qsv' in video_codec: actual_hw_type = 'intel'
-            elif 'amf' in video_codec: actual_hw_type = 'amd'
-            elif 'videotoolbox' in video_codec: actual_hw_type = 'mac'
+            actual_hw_type = "cpu"
+            if "nvenc" in video_codec:
+                actual_hw_type = "nvidia"
+            elif "qsv" in video_codec:
+                actual_hw_type = "intel"
+            elif "amf" in video_codec:
+                actual_hw_type = "amd"
+            elif "videotoolbox" in video_codec:
+                actual_hw_type = "mac"
 
             preset_map = {
-                'nvidia': {'fast': 'p1', 'balanced': 'p4', 'quality': 'p7'},
-                'intel': {'fast': 'veryfast', 'balanced': 'medium', 'quality': 'veryslow'},
-                'amd': {'fast': 'speed', 'balanced': 'balanced', 'quality': 'quality'},
-                'mac': {'fast': 'speed', 'balanced': 'default', 'quality': 'quality'},
-                'cpu': {'fast': 'superfast', 'balanced': 'medium', 'quality': 'slow'}
+                "nvidia": {"fast": "p1", "balanced": "p4", "quality": "p7"},
+                "intel": {
+                    "fast": "veryfast",
+                    "balanced": "medium",
+                    "quality": "veryslow",
+                },
+                "amd": {"fast": "speed", "balanced": "balanced", "quality": "quality"},
+                "mac": {"fast": "speed", "balanced": "default", "quality": "quality"},
+                "cpu": {"fast": "superfast", "balanced": "medium", "quality": "slow"},
             }
-            
-            preset_options = preset_map.get(actual_hw_type, preset_map['cpu'])
-            actual_preset = preset_options.get(params.preset, preset_options['balanced'])
 
-            if actual_hw_type == 'amd':
+            preset_options = preset_map.get(actual_hw_type, preset_map["cpu"])
+            actual_preset = preset_options.get(
+                params.preset, preset_options["balanced"]
+            )
+
+            if actual_hw_type == "amd":
                 command.extend(["-quality", actual_preset])
-            elif actual_hw_type != 'mac': 
+            elif actual_hw_type != "mac":
                 command.extend(["-preset", actual_preset])
 
             # 处理分辨率 - 智能选择 GPU 滤镜
             if params.resolution:
-                if enable_input_hw_accel and actual_hw_type == 'nvidia':
-                     # RTX 4050 可以在 GPU 内直接缩放
-                     command.extend(["-vf", f"scale_cuda={params.resolution.width}:{params.resolution.height}"])
-                elif enable_input_hw_accel and actual_hw_type == 'intel':
-                     command.extend(["-vf", f"scale_qsv={params.resolution.width}:{params.resolution.height}"])
+                if enable_input_hw_accel and actual_hw_type == "nvidia":
+                    # RTX 4050 可以在 GPU 内直接缩放
+                    command.extend(
+                        [
+                            "-vf",
+                            f"scale_cuda={params.resolution.width}:{params.resolution.height}",
+                        ]
+                    )
+                elif enable_input_hw_accel and actual_hw_type == "intel":
+                    command.extend(
+                        [
+                            "-vf",
+                            f"scale_qsv={params.resolution.width}:{params.resolution.height}",
+                        ]
+                    )
                 else:
-                    command.extend(["-s", f"{params.resolution.width}x{params.resolution.height}"])
+                    command.extend(
+                        ["-s", f"{params.resolution.width}x{params.resolution.height}"]
+                    )
 
             if params.startTime > 0 or params.endTime < params.totalDuration:
                 command.extend(["-force_key_frames", "expr:eq(n,0)"])
@@ -361,11 +434,12 @@ def construct_ffmpeg_command(input_path: str, output_path: str, params: schemas.
     command.append(output_path)
     return command
 
+
 @router.post("/process", response_model=List[schemas.Task])
 async def process_files(
     payload: schemas.ProcessPayload,
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     created_tasks = []
 
@@ -383,18 +457,23 @@ async def process_files(
         original_filename_base, _ = os.path.splitext(db_file.filename)
         final_display_name = f"{original_filename_base}_processed.{payload.container}"
         final_disk_filename = f"{uuid.uuid4()}.{payload.container}"
-        final_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), final_disk_filename))
+        final_output_path = os.path.normpath(
+            os.path.join(os.path.dirname(input_path), final_disk_filename)
+        )
         temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
-        temp_output_path = os.path.normpath(os.path.join(os.path.dirname(input_path), temp_output_filename))
+        temp_output_path = os.path.normpath(
+            os.path.join(os.path.dirname(input_path), temp_output_filename)
+        )
         command = construct_ffmpeg_command(input_path, temp_output_path, payload)
 
         ffmpeg_command_str = " ".join(shlex.quote(c) for c in command)
 
         task_in = schemas.TaskCreate(
-            ffmpeg_command=ffmpeg_command_str,
-            source_filename=db_file.filename
+            ffmpeg_command=ffmpeg_command_str, source_filename=db_file.filename
         )
-        db_task = crud.create_task(db=db, task=task_in, owner_id=current_user.id, output_path=final_output_path)
+        db_task = crud.create_task(
+            db=db, task=task_in, owner_id=current_user.id, output_path=final_output_path
+        )
 
         task_details = {
             "task_id": db_task.id,
@@ -418,11 +497,12 @@ async def process_files(
 
     return created_tasks
 
+
 @router.delete("/delete-file")
 async def delete_user_file(
     filename: str,
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
         file_id = int(filename)
@@ -446,24 +526,25 @@ async def delete_user_file(
 
     return {"message": f"File {filename} deleted."}
 
+
 @router.post("/upload", response_model=schemas.FileResponseForFrontend)
 async def upload_file(
     request: Request,
     file: UploadFile,
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     # --- [第一道防线] 检查 Content-Length ---
-    content_length = request.headers.get('content-length')
+    content_length = request.headers.get("content-length")
     if content_length:
         try:
             if int(content_length) > MAX_UPLOAD_SIZE:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"文件过大。限制为 {MAX_UPLOAD_SIZE / (1024*1024):.2f} MB"
+                    detail=f"文件过大。限制为 {MAX_UPLOAD_SIZE / (1024 * 1024):.2f} MB",
                 )
         except ValueError:
-            pass # 如果 header 格式不对，忽略，交给流式检查
+            pass  # 如果 header 格式不对，忽略，交给流式检查
 
     # --- [第二道防线] 检查文件扩展名 ---
     filename = file.filename or ""
@@ -471,50 +552,54 @@ async def upload_file(
     if ext.lower() not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件格式: {ext}。仅支持常见的音视频文件。"
+            detail=f"不支持的文件格式: {ext}。仅支持常见的音视频文件。",
         )
 
     try:
-        file_extension = ext 
+        file_extension = ext
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         user_upload_directory = os.path.join(UPLOAD_DIRECTORY, str(current_user.id))
         os.makedirs(user_upload_directory, exist_ok=True)
-        file_location = os.path.normpath(os.path.join(user_upload_directory, unique_filename))
+        file_location = os.path.normpath(
+            os.path.join(user_upload_directory, unique_filename)
+        )
 
         current_size = 0
         async with aiofiles.open(file_location, "wb") as out_f:
             while True:
-                chunk = await file.read(1024 * 1024) # 1MB chunk
+                chunk = await file.read(1024 * 1024)  # 1MB chunk
                 if not chunk:
                     break
-                
+
                 current_size += len(chunk)
                 if current_size > MAX_UPLOAD_SIZE:
                     # 超过限制：停止写入，显式关闭文件句柄，删除部分文件，抛出异常
-                    await out_f.close() 
+                    await out_f.close()
                     if os.path.exists(file_location):
                         os.remove(file_location)
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"文件实际大小超过限制 ({MAX_UPLOAD_SIZE / (1024*1024):.2f} MB)"
+                        detail=f"文件实际大小超过限制 ({MAX_UPLOAD_SIZE / (1024 * 1024):.2f} MB)",
                     )
-                
+
                 await out_f.write(chunk)
 
         loop = asyncio.get_running_loop()
         file_size = await loop.run_in_executor(None, os.path.getsize, file_location)
 
         try:
+
             def db_create():
                 return crud.create_user_file(
                     db=db,
                     file=schemas.FileCreate(
-                        filename=filename, # 使用原始文件名
+                        filename=filename,  # 使用原始文件名
                         filepath=file_location,
-                        status="uploaded"
+                        status="uploaded",
                     ),
-                    user_id=current_user.id
+                    user_id=current_user.id,
                 )
+
             db_file = await loop.run_in_executor(None, db_create)
         except Exception as e:
             # 如果数据库写入失败，删除刚刚上传的文件
@@ -538,7 +623,7 @@ async def upload_file(
         raise
     except Exception as e:
         # 清理垃圾文件
-        if 'file_location' in locals() and os.path.exists(file_location):
+        if "file_location" in locals() and os.path.exists(file_location):
             try:
                 os.remove(file_location)
             except OSError:

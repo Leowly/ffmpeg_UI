@@ -1,16 +1,24 @@
-# main.py - FastAPI app entry point
+# backend/app/main.py
+
 import os
 import asyncio
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from project root
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from . import config 
-from .database import engine, SessionLocal
 from . import models, crud
-from .routers import users, files, tasks
-from .processing import manager, worker
-from .config import UPLOAD_DIRECTORY
-from .limiter import limiter
+from .core import config
+from .core.database import engine, SessionLocal
+from .core.config import UPLOAD_DIRECTORY
+from .core.limiter import limiter
+from .api import users, files, tasks
+from .services.processing import manager, worker
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -25,7 +33,7 @@ app.state.limiter = limiter
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
 cors_origins_str = os.getenv("CORS_ORIGINS", "")
-origins = [origin.strip() for origin in cors_origins_str.split(',') if origin]
+origins = [origin.strip() for origin in cors_origins_str.split(",") if origin]
 if not origins:
     origins = ["http://localhost", "http://localhost:5173"]
 
@@ -39,21 +47,27 @@ app.add_middleware(
 )
 
 
-app.include_router(users.router) # 用户路由通常在根路径，如 /token, /users/
+app.include_router(users.router)  # 用户路由通常在根路径，如 /token, /users/
 app.include_router(files.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 
+
 @app.on_event("startup")
 async def startup_event():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     # Clean up stale tasks that were left in processing/pending state due to server restart
     db = SessionLocal()
     try:
         # 查找所有正在进行但因重启而中断的任务
-        stale_tasks = db.query(models.ProcessingTask).filter(
-            models.ProcessingTask.status.in_(['processing', 'pending'])
-        ).all()
+        stale_tasks = (
+            db.query(models.ProcessingTask)
+            .filter(models.ProcessingTask.status.in_(["processing", "pending"]))
+            .all()
+        )
 
         for task in stale_tasks:
             print(f"Marking stale task {task.id} as failed due to server restart.")
@@ -68,6 +82,7 @@ async def startup_event():
     asyncio.create_task(worker())
     print(">>> Background worker started.")
 
+
 @app.websocket("/ws/progress/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: int):
     await manager.connect(websocket, task_id)
@@ -76,6 +91,7 @@ async def websocket_endpoint(websocket: WebSocket, task_id: int):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(task_id)
+
 
 @app.get("/", tags=["Root"])
 def read_root():
