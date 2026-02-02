@@ -199,20 +199,21 @@ const handleDeleteFile = (fileId: string) => {
  * 从任务对象中提取并格式化描述信息
  */
 const getTaskDescription = (task: Task): string => {
-  const baseName =
-    task.source_filename || (task.output_path ? task.output_path.split(/[\\/]/).pop() : null)
+  // 对于已完成的任务，尝试从 fileList 中获取原始文件名
+  if (task.status === 'completed' && task.result_file_id) {
+    const resultFile = fileStore.fileList.find((f) => f.id === String(task.result_file_id))
+    if (resultFile) {
+      return `-> ${resultFile.name}`
+    }
+  }
 
+  // 对于其他任务，显示源文件名
+  const sourceName = task.source_filename || '未知文件'
   if (task.status === 'completed' && task.output_path) {
-    const outputFilename = task.output_path.split(/[\\/]/).pop()
-    return `-> ${outputFilename || '未知输出'}`
+    return `-> ${sourceName}`
   }
 
-  if (baseName) {
-    // 对于正在处理或失败的任务，显示源文件名
-    return `源: ${baseName}`
-  }
-
-  return '正在准备任务...'
+  return `源: ${sourceName}`
 }
 </script>
 
