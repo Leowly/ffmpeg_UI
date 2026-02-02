@@ -40,7 +40,6 @@
 ├── backend/         # Python FastAPI 后端应用
 ├── frontend/        # Vue 3 Vite 前端应用
 ├── runtime/         # 启动层（平台配置、事件循环、uvicorn 启动）
-├── shared/          # 协议层（前后端共享配置、常量）
 └── run.py           # 项目根入口（委托 runtime/run给_backend.py）
 ```
 
@@ -50,7 +49,6 @@
 |------|------|------|
 | `backend/` | **ASGI 应用定义** | FastAPI 路由、模型、业务逻辑 |
 | `runtime/` | **进程/生命周期管理** | 平台判断、事件循环配置、uvicorn 启动参数 |
-| `shared/` | **协议层** | 前后端共享的配置和常量（不含敏感信息） |
 | `run.py` | **项目入口** | 轻量代理，委托给 runtime 层 |
 
 ### 启动方式
