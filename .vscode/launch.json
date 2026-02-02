@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Backend Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests",
+                "-v",
+                "--tb=short"
+            ],
+            "cwd": "${workspaceFolder}/backend",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTEST_RUNNING": "1",
+                "SECRET_KEY": "test_secret_key_for_unit_testing_only_32chars"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Single Test",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${selectedTestName}",
+                "-v",
+                "--tb=short"
+            ],
+            "cwd": "${workspaceFolder}/backend",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTEST_RUNNING": "1",
+                "SECRET_KEY": "test_secret_key_for_unit_testing_only_32chars"
+            },
+            "justMyCode": false
+        }
+    ]
+}

@@ -20,7 +20,9 @@ from .core.limiter import limiter
 from .api import users, files, tasks
 from .services.processing import manager, worker
 
-models.Base.metadata.create_all(bind=engine)
+# 只在非测试模式下创建表
+if os.environ.get("PYTEST_RUNNING") != "1":
+    models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="FFmpeg UI Backend",

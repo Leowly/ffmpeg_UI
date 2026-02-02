@@ -1,0 +1,71 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "🧪 Run All Backend Tests",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/ -v",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 Run Auth Tests",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/test_api_auth.py -v",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 Run File Tests",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/test_api_files.py -v",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 Run Task Tests",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/test_api_tasks.py -v",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 Run FFmpeg Tests",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/test_ffmpeg_command.py -v",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "📊 Test with Coverage",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/backend && .venv/Scripts/python.exe -m pytest tests/ --cov=app --cov-report=term-missing --cov-report=html",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
