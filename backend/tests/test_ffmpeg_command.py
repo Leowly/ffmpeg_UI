@@ -1,5 +1,4 @@
 import os
-import shutil
 
 os.environ["SECRET_KEY"] = "test_secret_key_for_unit_testing_only"
 os.environ["ENABLE_HARDWARE_ACCELERATION_DETECTION"] = "false"
@@ -38,6 +37,101 @@ def create_payload(
         videoBitrate=videoBitrate,
         audioBitrate=audioBitrate,
     )
+
+
+class TestOriginalFFmpegCommands:
+    def test_cpu_basic_encoding(self):
+        payload = create_payload(
+            useHardwareAcceleration=False, videoCodec="libx264", preset="balanced"
+        )
+        with patch("app.api.process.detect_video_codec", return_value="h264"):
+            cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "-hwaccel" not in cmd_str
+        assert "-c:v libx264" in cmd_str
+        assert "-preset medium" in cmd_str
+        assert "-c:a aac" in cmd_str
+
+    @patch("app.api.process.detect_hardware_encoder")
+    @patch("app.api.process.detect_video_codec")
+    def test_nvidia_standard_encoding(self, mock_video_codec, mock_hw_encoder):
+        mock_hw_encoder.return_value = "nvidia"
+        mock_video_codec.return_value = "h264"
+        payload = create_payload(
+            useHardwareAcceleration=True, videoCodec="libx264", preset="balanced"
+        )
+        cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "-hwaccel cuda" in cmd_str
+        assert "-hwaccel_output_format cuda" in cmd_str
+        assert "-c:v h264_nvenc" in cmd_str
+        assert "-preset p4" in cmd_str
+
+    @patch("app.api.process.detect_hardware_encoder")
+    @patch("app.api.process.detect_video_codec")
+    def test_nvidia_av1_input_hybrid_mode(self, mock_video_codec, mock_hw_encoder):
+        mock_hw_encoder.return_value = "nvidia"
+        mock_video_codec.return_value = "av1"
+        payload = create_payload(
+            useHardwareAcceleration=True,
+            videoCodec="libx265",
+            preset="fast",
+        )
+        cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "-c:v hevc_nvenc" in cmd_str
+        assert "-preset p1" in cmd_str
+
+    @patch("app.api.process.detect_hardware_encoder")
+    @patch("app.api.process.detect_video_codec")
+    def test_nvidia_scaling_logic(self, mock_video_codec, mock_hw_encoder):
+        mock_hw_encoder.return_value = "nvidia"
+        res = schemas.Resolution(width=1280, height=720, keepAspectRatio=True)
+        mock_video_codec.return_value = "h264"
+        payload = create_payload(useHardwareAcceleration=True, resolution=res)
+        cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "scale_cuda=1280:720" in cmd_str
+        assert "-s 1280x720" not in cmd_str
+
+    @patch("app.api.process.detect_hardware_encoder")
+    @patch("app.api.process.detect_video_codec")
+    def test_cpu_fallback_preset_logic(self, mock_video_codec, mock_hw_encoder):
+        mock_hw_encoder.return_value = None
+        mock_video_codec.return_value = "h264"
+        payload = create_payload(
+            useHardwareAcceleration=True, videoCodec="libx264", preset="fast"
+        )
+        cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "-hwaccel" not in cmd_str
+        assert "-c:v libx264" in cmd_str
+        assert "-preset superfast" in cmd_str
+        assert "-preset p1" not in cmd_str
+
+    def test_audio_extraction(self):
+        payload = create_payload(container="mp3", audioCodec="libmp3lame")
+        with patch("app.api.process.detect_video_codec", return_value="h264"):
+            cmd = construct_ffmpeg_command("input.mp4", "output.mp3", payload)
+        cmd_str = " ".join(cmd)
+        assert "-vn" in cmd_str
+        assert "-c:a libmp3lame" in cmd_str
+        assert "-c:v" not in cmd_str
+
+    @patch("app.api.process.detect_hardware_encoder")
+    @patch("app.api.process.detect_video_codec")
+    def test_intel_qsv_encoding(self, mock_video_codec, mock_hw_encoder):
+        mock_hw_encoder.return_value = "intel"
+        mock_video_codec.return_value = "h264"
+        payload = create_payload(
+            useHardwareAcceleration=True, videoCodec="libx264", preset="balanced"
+        )
+        cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
+        cmd_str = " ".join(cmd)
+        assert "-hwaccel qsv" in cmd_str
+        assert "-hwaccel_output_format qsv" in cmd_str
+        assert "-c:v h264_qsv" in cmd_str
+        assert "-preset medium" in cmd_str
 
 
 class TestContainerCompatibility:
@@ -224,20 +318,6 @@ class TestResolution:
             cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
         cmd_str = " ".join(cmd)
         assert "-s 1280x720" in cmd_str
-
-    def test_resolution_with_hardware(self):
-        with patch("app.api.process.detect_hardware_encoder", return_value="nvidia"):
-            res = schemas.Resolution(width=1920, height=1080, keepAspectRatio=True)
-            payload = create_payload(
-                container="mp4",
-                videoCodec="libx264",
-                useHardwareAcceleration=True,
-                resolution=res,
-            )
-            with patch("app.api.process.detect_video_codec", return_value="h264"):
-                cmd = construct_ffmpeg_command("input.mp4", "output.mp4", payload)
-            cmd_str = " ".join(cmd)
-            assert "scale_cuda=1920:1080" in cmd_str
 
 
 class TestPresetMapping:
