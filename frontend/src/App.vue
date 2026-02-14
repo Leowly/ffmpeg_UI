@@ -13,7 +13,7 @@ import { useScreenLayout } from './composables/useScreenLayout'
 import { message } from 'ant-design-vue'
 import { ExportOutlined } from '@ant-design/icons-vue'
 
-const { spacing, fontSize, borderRadius, layout, isMobile } = useScreenLayout()
+const { spacing, fontSize, borderRadius, layout } = useScreenLayout()
 
 const cssVars = computed(() => ({
   '--spacing-xs': spacing.value.xs,
@@ -40,6 +40,7 @@ const fileStore = useFileStore()
 
 const isExportModalVisible = ref(false)
 const selectedTaskId = ref<number | null>(null)
+const hasSelectedFile = ref(false)
 
 let healthCheckInterval: number | null = null
 
@@ -53,11 +54,31 @@ const handleExportClick = () => {
 
 const selectedTask = computed(() => {
   if (selectedTaskId.value === null) return null
+  const cached = fileStore.taskDetailsCache.get(selectedTaskId.value)
+  if (cached) return cached
   return fileStore.taskList.find((task) => task.id === selectedTaskId.value) || null
 })
 
 const selectTask = (taskId: number) => {
   selectedTaskId.value = taskId
+  hasSelectedFile.value = false
+  fileStore.selectFile(null)
+}
+
+const handleFileSelected = () => {
+  selectedTaskId.value = null  // Switch from task to file view
+  hasSelectedFile.value = true
+}
+
+const closeTask = () => {
+  selectedTaskId.value = null
+  hasSelectedFile.value = false
+}
+
+const switchToFile = () => {
+  // Set file first, then clear task - ensures no flashing
+  hasSelectedFile.value = true
+  selectedTaskId.value = null
 }
 
 const startHealthCheck = () => {
@@ -110,13 +131,14 @@ onUnmounted(() => {
   <div v-else class="app-layout" :style="cssVars">
     <div class="sidebar">
       <div class="panel-card">
-        <AppSidebar @task-selected="selectTask" @file-selected="selectedTaskId = null" />
+        <AppSidebar :selected-task-id="selectedTaskId" @task-selected="selectTask" @file-selected="handleFileSelected" />
       </div>
     </div>
     <main class="main-content">
       <div class="panel-card">
-        <SingleFileWorkspace v-if="!selectedTaskId" />
-        <TaskDetails v-else-if="selectedTask" :task="selectedTask" @close="selectedTaskId = null" />
+        <SingleFileWorkspace v-if="hasSelectedFile && !selectedTaskId" />
+        <TaskDetails v-else-if="selectedTask" :task="selectedTask" @close="closeTask" @switch-to-file="switchToFile" />
+        <a-empty v-else description="请从左侧选择文件或任务" />
       </div>
     </main>
 

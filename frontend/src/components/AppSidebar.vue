@@ -35,7 +35,11 @@
             class="task-list-container"
           >
             <template #renderItem="{ item: task }">
-              <a-list-item class="task-item" @click="$emit('task-selected', task.id)">
+              <a-list-item
+                class="task-item"
+                :class="{ 'selected-item': props.selectedTaskId === task.id }"
+                @click="$emit('task-selected', task.id)"
+              >
                 <template #actions>
                   <a-popconfirm
                     v-if="['completed', 'failed'].includes(task.status)"
@@ -136,7 +140,7 @@ import { useScreenLayout } from '@/composables/useScreenLayout'
 import { API_ENDPOINTS } from '@/api'
 import { message, type UploadChangeParam, type UploadFile } from 'ant-design-vue'
 
-const { spacing, fontSize, borderRadius, isMobile } = useScreenLayout()
+useScreenLayout()
 import {
   InboxOutlined,
   VideoCameraOutlined,
@@ -149,6 +153,10 @@ import {
 } from '@ant-design/icons-vue'
 
 const emit = defineEmits(['task-selected', 'file-selected'])
+
+const props = defineProps<{
+  selectedTaskId?: number | null
+}>()
 
 const fileStore = useFileStore()
 const authStore = useAuthStore()
@@ -331,12 +339,12 @@ const getTaskDescription = (task: Task): string => {
 .file-list-container {
   flex-grow: 1;
   overflow-y: auto;
-  margin-top: var(--spacing-sm, 8px);
+  margin-top: var(--spacing-xs, 4px);
   padding-right: var(--spacing-xs, 4px);
 }
 
 .task-list-wrapper {
-  max-height: 200px;
+  max-height: 180px;
   overflow-y: auto;
   padding-right: var(--spacing-xs, 4px);
 }
@@ -358,7 +366,27 @@ const getTaskDescription = (task: Task): string => {
 .file-item,
 .task-item {
   cursor: pointer;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 6px 12px;
+  min-height: 52px;
+}
+
+.file-item :deep(.ant-list-item-meta),
+.task-item :deep(.ant-list-item-meta) {
+  align-items: center;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+.file-item :deep(.ant-list-item-meta-title),
+.task-item :deep(.ant-list-item-meta-title) {
+  margin-bottom: 0;
+  line-height: 1.3;
+}
+
+.file-item :deep(.ant-list-item-meta-description),
+.task-item :deep(.ant-list-item-meta-description) {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .file-item:hover,
@@ -378,7 +406,8 @@ const getTaskDescription = (task: Task): string => {
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
-  font-size: var(--font-sm);
+  font-size: 13px;
+  line-height: 1.3;
 }
 
 .sidebar-container :deep(.ant-list-item-meta-description) {
@@ -386,21 +415,26 @@ const getTaskDescription = (task: Task): string => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
-  font-size: var(--font-xs);
+  font-size: 11px;
+  line-height: 1.2;
+  margin-top: 2px;
 }
 
 .sidebar-container :deep(.ant-divider-with-text) {
-  margin: var(--spacing-sm) 0;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.65);
-  font-size: var(--font-sm);
+  margin: var(--spacing-md) 0;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+  font-size: 16px;
+  letter-spacing: 1px;
 }
 
 .divider-header {
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.65);
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
   text-align: center;
-  font-size: var(--font-sm);
+  font-size: 16px;
+  letter-spacing: 1px;
+  width: 100%;
 }
 
 .sidebar-container :deep(.ant-collapse) {
@@ -416,8 +450,10 @@ const getTaskDescription = (task: Task): string => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(0, 0, 0, 0.85);
-  font-weight: 500;
+  color: rgba(0, 0, 0, 0.8);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 1px;
 }
 .sidebar-container :deep(.ant-collapse-content) {
   border-top: none;
@@ -438,13 +474,38 @@ const getTaskDescription = (task: Task): string => {
     font-size: var(--font-sm);
   }
 
-  .file-list-container :deep(.ant-list-item-meta-title) {
-    font-size: var(--font-sm);
+  .file-list-container :deep(.ant-list-item-meta-title),
+  .task-list-wrapper :deep(.ant-list-item-meta-title) {
+    font-size: 12px;
   }
 
-  .file-list-container :deep(.ant-list-item-meta-description) {
-    max-width: 120px;
-    font-size: var(--font-xs);
+  .file-list-container :deep(.ant-list-item-meta-description),
+  .task-list-wrapper :deep(.ant-list-item-meta-description) {
+    max-width: 100px;
+    font-size: 10px;
+  }
+
+  .file-item,
+  .task-item {
+    padding: 4px 8px;
+    min-height: 44px;
+  }
+
+  .sidebar-container :deep(.ant-divider-with-text) {
+    font-size: 14px;
+    margin: var(--spacing-sm) 0;
+  }
+
+  .divider-header {
+    font-size: 14px;
+  }
+
+  .sidebar-container :deep(.ant-collapse-header) {
+    font-size: 14px;
+  }
+
+  .task-list-wrapper {
+    max-height: 150px;
   }
 }
 

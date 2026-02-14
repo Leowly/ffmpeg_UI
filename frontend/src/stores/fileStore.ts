@@ -74,6 +74,8 @@ export const useFileStore = defineStore('file', () => {
   const taskList: Ref<Task[]> = ref([])
   const isLoading = ref(false)
   const fileInfo = ref<FFProbeResult | null>(null)
+  const fileInfoCache = ref<Map<string, FFProbeResult>>(new Map())
+  const taskDetailsCache = ref<Map<number, Task>>(new Map())
   const error = ref<string | null>(null)
   const startTime = ref(0)
   const endTime = ref(0)
@@ -167,6 +169,7 @@ export const useFileStore = defineStore('file', () => {
     try {
       const response = await axios.get<FFProbeResult>(API_ENDPOINTS.FILE_INFO(fileId))
       fileInfo.value = response.data
+      fileInfoCache.value.set(fileId, response.data)
       const duration = parseFloat(response.data.format.duration)
       startTime.value = 0
       endTime.value = isNaN(duration) ? 0 : duration
@@ -187,7 +190,15 @@ export const useFileStore = defineStore('file', () => {
   function selectFile(fileId: string | null) {
     selectedFileId.value = fileId
     if (fileId) {
-      fetchFileInfo(fileId)
+      const cached = fileInfoCache.value.get(fileId)
+      if (cached) {
+        fileInfo.value = cached
+        const duration = parseFloat(cached.format.duration)
+        startTime.value = 0
+        endTime.value = isNaN(duration) ? 0 : duration
+      } else {
+        fetchFileInfo(fileId)
+      }
     } else {
       fileInfo.value = null
       error.value = null
@@ -219,18 +230,30 @@ export const useFileStore = defineStore('file', () => {
   }
 
   async function fetchSingleTaskAndUpdate(taskId: number) {
+    const cached = taskDetailsCache.value.get(taskId)
+    if (cached) {
+      const taskIndex = taskList.value.findIndex((task) => task.id === taskId)
+      if (taskIndex !== -1) {
+        taskList.value[taskIndex] = cached
+      }
+      return cached
+    }
     try {
       const response = await axios.get<Task>(API_ENDPOINTS.GET_TASK_DETAILS(taskId))
       const updatedTask = response.data
+      if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
+        taskDetailsCache.value.set(taskId, updatedTask)
+      }
 
       const taskIndex = taskList.value.findIndex((task) => task.id === taskId)
       if (taskIndex !== -1) {
-        // 如果找到了任务，就用最新的数据替换它
         taskList.value[taskIndex] = updatedTask
       }
+      return updatedTask
     } catch (error) {
       console.error(`Failed to fetch details for task #${taskId}:`, error)
       message.error('无法获取最新的任务详情。')
+      return null
     }
   }
 
@@ -275,6 +298,7 @@ export const useFileStore = defineStore('file', () => {
     try {
       await axios.delete(`${API_ENDPOINTS.DELETE_FILE}?filename=${fileId}`)
       fileList.value = fileList.value.filter((f) => f.id !== fileId)
+      fileInfoCache.value.delete(fileId)
       if (selectedFileId.value === fileId) {
         selectFile(null)
       }
@@ -296,6 +320,7 @@ export const useFileStore = defineStore('file', () => {
     try {
       await axios.delete(API_ENDPOINTS.DELETE_TASK(taskId))
       taskList.value = taskList.value.filter((t) => t.id !== taskId)
+      taskDetailsCache.value.delete(taskId)
       wsConnections.value.get(taskId)?.close()
       message.success(`Task #${taskId} has been cleared`)
     } catch (error) {
@@ -425,10 +450,12 @@ export const useFileStore = defineStore('file', () => {
     }
   }
 
-  async function initializeStore() {
+async function initializeStore() {
+    fileInfoCache.value.clear()
+    taskDetailsCache.value.clear()
     await fetchFileList()
     await fetchTaskList()
-    await fetchSystemCapabilities() // 初始化时获取能力
+    await fetchSystemCapabilities()
   }
 
   onUnmounted(() => {
@@ -450,6 +477,7 @@ export const useFileStore = defineStore('file', () => {
     selectFile,
     fetchFileList,
     fetchTaskList,
+    taskDetailsCache,
     addFile,
     addTasks,
     removeFile,

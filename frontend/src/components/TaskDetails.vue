@@ -7,11 +7,6 @@
           <a-tag :color="getStatusColor(task.status)">{{ getStatusText(task.status) }}</a-tag>
         </div>
       </div>
-      <a-button @click="emit('close')" type="text" class="close-btn">
-        <template #icon>
-          <close-outlined />
-        </template>
-      </a-button>
     </div>
 
     <div class="task-info">
@@ -78,13 +73,13 @@
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useFileStore, type Task } from '@/stores/fileStore'
 import { message } from 'ant-design-vue'
-import { CopyOutlined, DownloadOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons-vue'
+import { CopyOutlined, DownloadOutlined, FileOutlined } from '@ant-design/icons-vue'
 
 const props = defineProps<{
   task: Task
 }>()
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'switch-to-file'])
 
 const fileStore = useFileStore()
 
@@ -190,13 +185,13 @@ const copyErrorDetails = async () => {
 
 const goToFile = () => {
   fileStore.selectFileByTask(props.task)
-  emit('close')
+  emit('switch-to-file')
 }
 
 const goToFileAndDownload = () => {
   const fileId = fileStore.selectFileByTask(props.task)
   if (fileId) {
-    emit('close')
+    emit('switch-to-file')
     nextTick(() => {
       fileStore.downloadFile(fileId)
     })
