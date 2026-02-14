@@ -66,7 +66,7 @@ const selectTask = (taskId: number) => {
 }
 
 const handleFileSelected = () => {
-  selectedTaskId.value = null  // Switch from task to file view
+  selectedTaskId.value = null // Switch from task to file view
   hasSelectedFile.value = true
 }
 
@@ -118,7 +118,7 @@ watch(
       stopHealthCheck()
     }
   },
-  { immediate: true } // 初始化时立即执行一次
+  { immediate: true }, // 初始化时立即执行一次
 )
 
 onUnmounted(() => {
@@ -131,13 +131,22 @@ onUnmounted(() => {
   <div v-else class="app-layout" :style="cssVars">
     <div class="sidebar">
       <div class="panel-card">
-        <AppSidebar :selected-task-id="selectedTaskId" @task-selected="selectTask" @file-selected="handleFileSelected" />
+        <AppSidebar
+          :selected-task-id="selectedTaskId"
+          @task-selected="selectTask"
+          @file-selected="handleFileSelected"
+        />
       </div>
     </div>
     <main class="main-content">
       <div class="panel-card">
         <SingleFileWorkspace v-if="hasSelectedFile && !selectedTaskId" />
-        <TaskDetails v-else-if="selectedTask" :task="selectedTask" @close="closeTask" @switch-to-file="switchToFile" />
+        <TaskDetails
+          v-else-if="selectedTask"
+          :task="selectedTask"
+          @close="closeTask"
+          @switch-to-file="switchToFile"
+        />
         <a-empty v-else description="请从左侧选择文件或任务" />
       </div>
     </main>
@@ -177,7 +186,10 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease, padding 0.3s ease;
+  transition:
+    width 0.3s ease,
+    padding 0.3s ease;
+  overflow-x: hidden;
 }
 
 .main-content {
@@ -195,6 +207,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
 
 .bottom-toolbar {
@@ -250,21 +263,30 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .app-layout {
     flex-direction: column;
+    height: 100dvh; /* 使用动态视口高度，避免移动端地址栏问题 */
   }
 
   .sidebar {
     width: 100%;
     height: auto;
-    max-height: 40vh;
+    max-height: 35vh;
     border-right: none;
     min-width: unset;
+    padding-bottom: 0;
   }
 
   .main-content {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
+    padding-top: var(--spacing-xs);
+  }
+
+  .panel-card {
+    min-height: 0;
   }
 
   .bottom-toolbar {
+    position: fixed;
     bottom: var(--spacing-xs);
     left: var(--spacing-sm);
     right: var(--spacing-sm);
