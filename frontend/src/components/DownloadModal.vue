@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onUnmounted } from 'vue'
-import { useFileStore, type UserFile } from '@/stores/fileStore'
+import { ref, watch, computed, onUnmounted } from 'vue'
+import { useFileStore } from '@/stores/fileStore'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
 import { DownloadOutlined } from '@ant-design/icons-vue'
-import axios from 'axios'
 
 interface DownloadItem {
   fileId: string
@@ -14,11 +13,6 @@ interface DownloadItem {
   error?: string
 }
 
-interface DownloadProgress {
-  fileId: string
-  loaded: number
-  total: number
-}
 
 const props = defineProps<{
   visible: boolean
@@ -35,12 +29,9 @@ const currentDownloadIndex = ref(-1)
 // Track active download XHRs for abort
 const activeXHRs = ref<Map<string, XMLHttpRequest>>(new Map())
 
-const canStartDownload = computed(() => 
-  selectedFileIds.value.length > 0 && !isDownloading.value
-)
 
-const completedCount = computed(() => 
-  downloadQueue.value.filter(d => d.status === 'completed').length
+const completedCount = computed(
+  () => downloadQueue.value.filter((d) => d.status === 'completed').length,
 )
 
 const totalCount = computed(() => downloadQueue.value.length)
@@ -54,13 +45,13 @@ watch(
       downloadQueue.value = []
       isDownloading.value = false
       currentDownloadIndex.value = -1
-      
+
       // Fetch file list if empty
       if (fileStore.fileList.length === 0) {
         fileStore.fetchFileList()
       }
     }
-  }
+  },
 )
 
 const handleOk = () => {
@@ -68,18 +59,18 @@ const handleOk = () => {
     message.warning('请选择要下载的文件')
     return
   }
-  
+
   // Build download queue
-  downloadQueue.value = selectedFileIds.value.map(fileId => {
-    const file = fileStore.fileList.find(f => f.id === fileId)
+  downloadQueue.value = selectedFileIds.value.map((fileId) => {
+    const file = fileStore.fileList.find((f) => f.id === fileId)
     return {
       fileId,
       fileName: file?.name || fileId,
       status: 'pending',
-      progress: 0
+      progress: 0,
     }
   })
-  
+
   // Start downloads
   isDownloading.value = true
   startNextDownload()
@@ -90,12 +81,12 @@ const handleCancel = () => {
 }
 
 const startNextDownload = async () => {
-  const nextIndex = downloadQueue.value.findIndex(d => d.status === 'pending')
-  
+  const nextIndex = downloadQueue.value.findIndex((d) => d.status === 'pending')
+
   if (nextIndex === -1) {
     // All downloads completed
     isDownloading.value = false
-    const errorCount = downloadQueue.value.filter(d => d.status === 'error').length
+    const errorCount = downloadQueue.value.filter((d) => d.status === 'error').length
     if (errorCount === 0) {
       message.success(`已成功下载 ${downloadQueue.value.length} 个文件`)
     } else {
@@ -103,45 +94,51 @@ const startNextDownload = async () => {
     }
     return
   }
-  
+
   currentDownloadIndex.value = nextIndex
   const item = downloadQueue.value[nextIndex]
   item.status = 'downloading'
-  
+
   await downloadFile(item)
 }
 
 const downloadFile = async (item: DownloadItem) => {
   const downloadUrl = API_ENDPOINTS.DOWNLOAD_FILE(item.fileId)
-  
+
   try {
     // Create XHR for progress tracking
     const xhr = new XMLHttpRequest()
     activeXHRs.value.set(item.fileId, xhr)
-    
+
     await new Promise<void>((resolve, reject) => {
       xhr.open('GET', downloadUrl, true)
       xhr.responseType = 'blob'
-      
+
+      // Set Authorization header with token
+      const token = localStorage.getItem('access_token')
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      }
+
       xhr.onprogress = (event) => {
         if (event.lengthComputable) {
           item.progress = Math.round((event.loaded / event.total) * 100)
         }
       }
-      
+
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           const blob = xhr.response
           const contentDisposition = xhr.getResponseHeader('content-disposition')
           let filename = item.fileName
-          
+
           if (contentDisposition) {
             const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/)
             if (filenameMatch && filenameMatch.length > 1) {
               filename = decodeURIComponent(filenameMatch[1])
             }
           }
-          
+
           // Trigger download
           const link = document.createElement('a')
           link.href = window.URL.createObjectURL(blob)
@@ -150,7 +147,7 @@ const downloadFile = async (item: DownloadItem) => {
           link.click()
           window.URL.revokeObjectURL(link.href)
           document.body.removeChild(link)
-          
+
           item.status = 'completed'
           item.progress = 100
           resolve()
@@ -160,13 +157,13 @@ const downloadFile = async (item: DownloadItem) => {
           reject(new Error(`HTTP ${xhr.status}`))
         }
       }
-      
+
       xhr.onerror = () => {
         item.status = 'error'
         item.error = 'Network error'
         reject(new Error('Network error'))
       }
-      
+
       xhr.send()
     })
   } catch (error) {
@@ -180,19 +177,19 @@ const downloadFile = async (item: DownloadItem) => {
 
 const cancelAllDownloads = () => {
   // Abort all active downloads
-  activeXHRs.value.forEach((xhr, fileId) => {
+  activeXHRs.value.forEach((xhr) => {
     xhr.abort()
   })
   activeXHRs.value.clear()
-  
+
   // Mark remaining as pending
-  downloadQueue.value.forEach(item => {
+  downloadQueue.value.forEach((item) => {
     if (item.status === 'downloading') {
       item.status = 'pending'
       item.progress = 0
     }
   })
-  
+
   isDownloading.value = false
   message.info('已取消下载')
 }
@@ -221,7 +218,7 @@ onUnmounted(() => {
           show-icon
           style="margin-bottom: 16px"
         />
-        
+
         <div class="file-list">
           <a-checkbox-group
             v-if="fileStore.fileList.length > 0"
@@ -239,20 +236,16 @@ onUnmounted(() => {
           </a-checkbox-group>
           <a-empty v-else description="没有可下载的文件" />
         </div>
-        
+
         <div class="modal-footer">
           <a-button @click="handleCancel">取消</a-button>
-          <a-button
-            type="primary"
-            :disabled="selectedFileIds.length === 0"
-            @click="handleOk"
-          >
+          <a-button type="primary" :disabled="selectedFileIds.length === 0" @click="handleOk">
             <DownloadOutlined />
             开始下载 ({{ selectedFileIds.length }})
           </a-button>
         </div>
       </div>
-      
+
       <!-- Download Progress Section -->
       <div v-else class="download-progress">
         <a-alert
@@ -262,7 +255,7 @@ onUnmounted(() => {
           show-icon
           style="margin-bottom: 16px"
         />
-        
+
         <div class="progress-list">
           <div
             v-for="(item, index) in downloadQueue"
@@ -273,23 +266,33 @@ onUnmounted(() => {
             <div class="progress-info">
               <span class="file-name">{{ item.fileName }}</span>
               <span v-if="item.status === 'completed'" class="status-text success">已完成</span>
-              <span v-else-if="item.status === 'error'" class="status-text error">{{ item.error }}</span>
-              <span v-else-if="item.status === 'downloading'" class="status-text">{{ item.progress }}%</span>
+              <span v-else-if="item.status === 'error'" class="status-text error">{{
+                item.error
+              }}</span>
+              <span v-else-if="item.status === 'downloading'" class="status-text"
+                >{{ item.progress }}%</span
+              >
               <span v-else class="status-text">等待中</span>
             </div>
             <a-progress
               :percent="item.progress"
-              :status="item.status === 'completed' ? 'success' : item.status === 'error' ? 'exception' : 'active'"
+              :status="
+                item.status === 'completed'
+                  ? 'success'
+                  : item.status === 'error'
+                    ? 'exception'
+                    : 'active'
+              "
               :show-info="false"
               size="small"
             />
           </div>
         </div>
-        
+
         <div class="progress-summary">
           <span>进度: {{ completedCount }} / {{ totalCount }}</span>
         </div>
-        
+
         <div class="modal-footer">
           <a-button @click="handleCancel">关闭弹窗（后台继续）</a-button>
           <a-button danger @click="cancelAllDownloads">取消全部</a-button>
