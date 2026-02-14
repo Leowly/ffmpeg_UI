@@ -9,7 +9,30 @@ import ExportModal from './components/ExportModal.vue'
 import TaskDetails from './components/TaskDetails.vue'
 import { useAuthStore } from './stores/authStore'
 import { useFileStore } from './stores/fileStore'
+import { useScreenLayout } from './composables/useScreenLayout'
 import { message } from 'ant-design-vue'
+
+const { spacing, fontSize, borderRadius, layout, isMobile } = useScreenLayout()
+
+const cssVars = computed(() => ({
+  '--spacing-xs': spacing.value.xs,
+  '--spacing-sm': spacing.value.sm,
+  '--spacing-md': spacing.value.md,
+  '--spacing-lg': spacing.value.lg,
+  '--spacing-xl': spacing.value.xl,
+  '--font-xs': fontSize.value.xs,
+  '--font-sm': fontSize.value.sm,
+  '--font-md': fontSize.value.md,
+  '--font-lg': fontSize.value.lg,
+  '--font-xl': fontSize.value.xl,
+  '--radius-sm': borderRadius.value.sm,
+  '--radius-md': borderRadius.value.md,
+  '--radius-lg': borderRadius.value.lg,
+  '--sidebar-width': layout.value.sidebarWidth,
+  '--content-padding': layout.value.contentPadding,
+  '--card-padding': layout.value.cardPadding,
+  '--gap': layout.value.gap,
+}))
 
 const authStore = useAuthStore()
 const fileStore = useFileStore()
@@ -83,7 +106,7 @@ onUnmounted(() => {
 
 <template>
   <AuthForm v-if="!authStore.isLoggedIn" />
-  <div v-else class="app-layout">
+  <div v-else class="app-layout" :style="cssVars">
     <div class="sidebar">
       <div class="panel-card">
         <AppSidebar @task-selected="selectTask" @file-selected="selectedTaskId = null" />
@@ -122,27 +145,28 @@ onUnmounted(() => {
 }
 
 .sidebar {
-  width: 350px;
-  min-width: 300px;
+  width: var(--sidebar-width, 350px);
+  min-width: 250px;
   background-color: transparent;
-  padding: 4px;
+  padding: var(--content-padding);
   overflow-y: auto;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  transition: width 0.3s ease, padding 0.3s ease;
 }
 
 .main-content {
   flex-grow: 1;
-  padding: 4px;
+  padding: var(--content-padding);
   overflow-y: auto;
 }
 
 .panel-card {
   background-color: #fff;
   border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: var(--radius-md);
+  padding: var(--card-padding);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -151,12 +175,12 @@ onUnmounted(() => {
 
 .bottom-toolbar {
   position: fixed;
-  bottom: 10px;
-  left: 20px;
+  bottom: var(--spacing-sm);
+  left: var(--spacing-md);
   z-index: 1000;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--spacing-md);
 }
 
 @media (max-width: 768px) {
@@ -174,6 +198,17 @@ onUnmounted(() => {
 
   .main-content {
     height: 100%;
+  }
+
+  .bottom-toolbar {
+    bottom: var(--spacing-xs);
+    left: var(--spacing-sm);
+    gap: var(--spacing-sm);
+  }
+
+  .bottom-toolbar :deep(.ant-btn) {
+    font-size: var(--font-sm);
+    padding: 4px 12px;
   }
 }
 </style>

@@ -109,12 +109,10 @@
               <a @click.stop><delete-outlined /></a>
             </a-popconfirm>
           </template>
-          <a-list-item-meta :description="`${(item.size / 1024 / 1024).toFixed(2)} MB`">
-            <template #title>
-              <a-tooltip :title="item.name" placement="topLeft">
+            <a-list-item-meta :description="`${(item.size / 1024 / 1024).toFixed(2)} MB`">
+              <template #title>
                 <span class="file-name">{{ item.name }}</span>
-              </a-tooltip>
-            </template>
+              </template>
             <template #avatar>
               <video-camera-outlined v-if="item.name.match(/\.(mp4|mov|mkv|avi|webm)$/i)" />
               <customer-service-outlined
@@ -134,8 +132,11 @@
 import { ref, computed, watch, h } from 'vue'
 import { useFileStore, type Task, type UserFile } from '@/stores/fileStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useScreenLayout } from '@/composables/useScreenLayout'
 import { API_ENDPOINTS } from '@/api'
 import { message, type UploadChangeParam, type UploadFile } from 'ant-design-vue'
+
+const { spacing, fontSize, borderRadius, isMobile } = useScreenLayout()
 import {
   InboxOutlined,
   VideoCameraOutlined,
@@ -330,17 +331,16 @@ const getTaskDescription = (task: Task): string => {
 .file-list-container {
   flex-grow: 1;
   overflow-y: auto;
-  margin-top: 8px;
-  padding-right: 4px;
+  margin-top: var(--spacing-sm, 8px);
+  padding-right: var(--spacing-xs, 4px);
 }
 
 .task-list-wrapper {
   max-height: 200px;
   overflow-y: auto;
-  padding-right: 4px; /* 为滚动条留出空间 */
+  padding-right: var(--spacing-xs, 4px);
 }
 
-/* 优化滚动条样式 */
 .file-list-container::-webkit-scrollbar,
 .task-list-wrapper::-webkit-scrollbar {
   width: 6px;
@@ -358,7 +358,7 @@ const getTaskDescription = (task: Task): string => {
 .file-item,
 .task-item {
   cursor: pointer;
-  padding: 8px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
 .file-item:hover,
@@ -378,52 +378,55 @@ const getTaskDescription = (task: Task): string => {
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
+  font-size: var(--font-sm);
 }
 
 .sidebar-container :deep(.ant-list-item-meta-description) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 180px; /* 限制描述文本宽度 */
+  max-width: 180px;
+  font-size: var(--font-xs);
 }
 
-/* 紧凑化分隔符样式 */
 .sidebar-container :deep(.ant-divider-with-text) {
-  margin: 12px 0;
+  margin: var(--spacing-sm) 0;
   font-weight: 500;
   color: rgba(0, 0, 0, 0.65);
+  font-size: var(--font-sm);
 }
 
 .divider-header {
   font-weight: 500;
   color: rgba(0, 0, 0, 0.65);
   text-align: center;
+  font-size: var(--font-sm);
 }
 
 .sidebar-container :deep(.ant-collapse) {
-  margin: 12px 0;
-  border: none; /* 移除边框 */
-  background-color: transparent; /* 移除背景色 */
+  margin: var(--spacing-sm) 0;
+  border: none;
+  background-color: transparent;
 }
 .sidebar-container :deep(.ant-collapse > .ant-collapse-item) {
-  border-bottom: none; /* 移除项的下边框 */
+  border-bottom: none;
 }
 .sidebar-container :deep(.ant-collapse-header) {
-  padding: 0 !important; /* 移除内边距 */
+  padding: 0 !important;
   display: flex;
   align-items: center;
-  justify-content: center; /* 居中文本 */
+  justify-content: center;
   color: rgba(0, 0, 0, 0.85);
   font-weight: 500;
 }
 .sidebar-container :deep(.ant-collapse-content) {
-  border-top: none; /* 移除内容的顶部边框 */
+  border-top: none;
 }
 .sidebar-container :deep(.ant-collapse-content-box) {
   padding: 0 !important;
 }
 .sidebar-container :deep(.ant-collapse-arrow) {
-  display: none; /* 隐藏默认的箭头 */
+  display: none;
 }
 
 @media (max-width: 768px) {
@@ -432,7 +435,16 @@ const getTaskDescription = (task: Task): string => {
     display: none;
   }
   .sidebar-container :deep(.ant-upload-text) {
-    font-size: 14px;
+    font-size: var(--font-sm);
+  }
+
+  .file-list-container :deep(.ant-list-item-meta-title) {
+    font-size: var(--font-sm);
+  }
+
+  .file-list-container :deep(.ant-list-item-meta-description) {
+    max-width: 120px;
+    font-size: var(--font-xs);
   }
 }
 

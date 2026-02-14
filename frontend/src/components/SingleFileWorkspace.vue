@@ -131,9 +131,11 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
+import { useScreenLayout } from '@/composables/useScreenLayout'
 import { DownloadOutlined } from '@ant-design/icons-vue'
 
 const fileStore = useFileStore()
+const { spacing, fontSize, borderRadius } = useScreenLayout()
 
 // --- Refs for UI ---
 const workspaceRef = ref<HTMLElement | null>(null)
@@ -318,8 +320,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .workspace-container {
   height: 100%;
-  overflow-y: auto; /* 允许内容超出时滚动 */
-  background-color: transparent; /* 交由外层 .panel-card 控制背景 */
+  overflow-y: auto;
+  background-color: transparent;
 }
 
 .placeholder,
@@ -330,17 +332,17 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 24px;
+  padding: var(--spacing-lg, 24px);
   box-sizing: border-box;
 }
 
 .file-workspace {
-  padding: 2px; /* 由 .panel-card 提供统一内边距 */
+  padding: 2px;
   box-sizing: border-box;
 }
 
 .operation-section {
-  margin-top: 16px;
+  margin-top: var(--spacing-md, 16px);
   padding-right: 3px;
   padding-left: 3px;
 }
@@ -363,22 +365,20 @@ onBeforeUnmount(() => {
 }
 
 .bottom-spacer {
-  height: 40px; /* 预留给左下角浮动按钮的空间 */
+  height: 40px;
 }
 
-/* --- 响应式布局 -- */
 @media (max-width: 768px) {
-  /* 使用 :deep() 选择器来穿透到子组件的样式 */
   .file-workspace :deep(.ant-page-header-heading) {
-    flex-basis: 100%; /* 让标题区域占据整行 */
+    flex-basis: 100%;
   }
   .file-workspace :deep(.ant-page-header-extra) {
-    margin-top: 16px; /* 与标题拉开距离 */
-    width: 100%; /* 占据整行 */
-    text-align: left; /* 按钮靠左对齐 */
+    margin-top: 16px;
+    width: 100%;
+    text-align: left;
   }
   .file-workspace :deep(.ant-page-header-extra .ant-btn) {
-    width: 100%; /* 按钮宽度撑满 */
+    width: 100%;
   }
 }
 </style>
