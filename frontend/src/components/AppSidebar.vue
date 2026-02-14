@@ -190,7 +190,9 @@ const handleUploadChange = (info: UploadChangeParam) => {
     fileStore.updateFileProgress(info.file.uid, Math.round(percent))
   } else if (info.file.status === 'done') {
     message.success(`${info.file.name} 文件上传成功`)
-    fileStore.updateFileStatus(info.file.uid, 'done')
+    // 移除临时文件（使用前端 uid），避免重复显示
+    fileStore.removeUploadingFile(info.file.uid)
+    // 添加服务器返回的文件
     fileStore.addFile(info.file.response)
   } else if (info.file.status === 'error') {
     const errorMsg = info.file.response?.detail || '网络错误'

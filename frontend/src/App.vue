@@ -6,12 +6,13 @@ import SingleFileWorkspace from './components/SingleFileWorkspace.vue'
 import AuthForm from './components/AuthForm.vue'
 import UserInfo from './components/UserInfo.vue'
 import ExportModal from './components/ExportModal.vue'
+import DownloadModal from './components/DownloadModal.vue'
 import TaskDetails from './components/TaskDetails.vue'
 import { useAuthStore } from './stores/authStore'
 import { useFileStore } from './stores/fileStore'
 import { useScreenLayout } from './composables/useScreenLayout'
 import { message } from 'ant-design-vue'
-import { ExportOutlined } from '@ant-design/icons-vue'
+import { ExportOutlined, DownloadOutlined } from '@ant-design/icons-vue'
 
 const { spacing, fontSize, borderRadius, layout } = useScreenLayout()
 
@@ -39,6 +40,7 @@ const authStore = useAuthStore()
 const fileStore = useFileStore()
 
 const isExportModalVisible = ref(false)
+const isDownloadModalVisible = ref(false)
 const selectedTaskId = ref<number | null>(null)
 const hasSelectedFile = ref(false)
 
@@ -50,6 +52,14 @@ const handleExportClick = () => {
     return
   }
   isExportModalVisible.value = true
+}
+
+const handleDownloadClick = () => {
+  if (fileStore.fileList.length === 0) {
+    message.warning('文件列表为空，请先上传一些文件。')
+    return
+  }
+  isDownloadModalVisible.value = true
 }
 
 const selectedTask = computed(() => {
@@ -157,12 +167,20 @@ onUnmounted(() => {
         <template #icon><ExportOutlined /></template>
         导出文件
       </a-button>
+      <a-button class="download-button" shape="round" size="large" @click="handleDownloadClick">
+        <template #icon><DownloadOutlined /></template>
+        一键下载
+      </a-button>
     </div>
 
     <ExportModal
       v-model:visible="isExportModalVisible"
       :initial-start-time="fileStore.startTime"
       :initial-end-time="fileStore.endTime"
+    />
+
+    <DownloadModal
+      v-model:visible="isDownloadModalVisible"
     />
   </div>
 </template>
@@ -260,6 +278,39 @@ onUnmounted(() => {
   font-size: 16px;
 }
 
+.download-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  min-width: 110px;
+  height: 40px;
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 2px 10px rgba(56, 239, 125, 0.35);
+  transition: all 0.3s ease;
+}
+
+.download-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(56, 239, 125, 0.5);
+  background: linear-gradient(135deg, #0fa89a 0%, #2dd36d 100%);
+}
+
+.download-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(56, 239, 125, 0.35);
+}
+
+.download-button :deep(.anticon) {
+  font-size: 16px;
+}
+
 @media (max-width: 768px) {
   .app-layout {
     flex-direction: column;
@@ -306,6 +357,18 @@ onUnmounted(() => {
   }
 
   .export-button :deep(.anticon) {
+    font-size: 14px;
+  }
+
+  .download-button {
+    flex: 1;
+    min-width: unset;
+    padding: 0 12px;
+    height: 36px;
+    font-size: 13px;
+  }
+
+  .download-button :deep(.anticon) {
     font-size: 14px;
   }
 
