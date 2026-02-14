@@ -11,6 +11,7 @@ import { useAuthStore } from './stores/authStore'
 import { useFileStore } from './stores/fileStore'
 import { useScreenLayout } from './composables/useScreenLayout'
 import { message } from 'ant-design-vue'
+import { ExportOutlined } from '@ant-design/icons-vue'
 
 const { spacing, fontSize, borderRadius, layout, isMobile } = useScreenLayout()
 
@@ -121,7 +122,8 @@ onUnmounted(() => {
 
     <div class="bottom-toolbar">
       <UserInfo />
-      <a-button type="primary" shape="round" size="large" @click="handleExportClick">
+      <a-button class="export-button" shape="round" size="large" @click="handleExportClick">
+        <template #icon><ExportOutlined /></template>
         导出文件
       </a-button>
     </div>
@@ -175,12 +177,52 @@ onUnmounted(() => {
 
 .bottom-toolbar {
   position: fixed;
-  bottom: var(--spacing-sm);
-  left: var(--spacing-md);
+  bottom: var(--spacing-md);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.export-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  min-width: 110px;
+  height: 40px;
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 2px 10px rgba(56, 239, 125, 0.35);
+  transition: all 0.3s ease;
+}
+
+.export-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(56, 239, 125, 0.5);
+  background: linear-gradient(135deg, #0fa89a 0%, #2dd36d 100%);
+}
+
+.export-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(56, 239, 125, 0.35);
+}
+
+.export-button :deep(.anticon) {
+  font-size: 16px;
 }
 
 @media (max-width: 768px) {
@@ -203,12 +245,42 @@ onUnmounted(() => {
   .bottom-toolbar {
     bottom: var(--spacing-xs);
     left: var(--spacing-sm);
-    gap: var(--spacing-sm);
+    right: var(--spacing-sm);
+    transform: none;
+    justify-content: space-between;
+    padding: 6px 10px;
+    gap: 8px;
+    border-radius: 16px;
   }
 
-  .bottom-toolbar :deep(.ant-btn) {
-    font-size: var(--font-sm);
-    padding: 4px 12px;
+  .export-button {
+    flex: 1;
+    min-width: unset;
+    padding: 0 12px;
+    height: 36px;
+    font-size: 13px;
+  }
+
+  .export-button :deep(.anticon) {
+    font-size: 14px;
+  }
+
+  .bottom-toolbar :deep(.user-button) {
+    min-width: 36px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .bottom-toolbar :deep(.user-avatar) {
+    width: 24px !important;
+    height: 24px !important;
+    line-height: 24px !important;
+  }
+
+  .bottom-toolbar :deep(.user-avatar .anticon) {
+    font-size: 14px;
   }
 }
 </style>
