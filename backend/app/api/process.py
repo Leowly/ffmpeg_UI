@@ -16,61 +16,12 @@ from ..models import models
 from ..schemas import schemas
 from ..core.deps import get_current_user, get_db
 from ..services.processing import manager, user_task_queues
-from ..core.config import reconstruct_file_path, ENABLE_HW_ACCEL_DETECTION
+from ..services.hw_accel import detect_hardware_encoder
+from ..core.config import reconstruct_file_path
 
 router = APIRouter(
     tags=["Files"],
 )
-
-
-def detect_video_codec(input_path: str) -> str:
-    """检测视频文件的视频编码格式"""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=codec_name",
-            "-of",
-            "default=nw=1:nk=1",
-            input_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.stdout.strip()
-    except Exception:
-        return ""
-
-
-def detect_hardware_encoder() -> str | None:
-    """
-    检测可用的硬件编码器类型。
-    返回: 'nvidia', 'intel', 'amd', 'mac' 或 None
-    """
-    if not ENABLE_HW_ACCEL_DETECTION:
-        return None
-
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-v", "quiet", "-encoders"], capture_output=True, text=True
-        )
-        output = result.stdout
-
-        if "h264_nvenc" in output or "hevc_nvenc" in output:
-            return "nvidia"
-        if "h264_qsv" in output or "hevc_qsv" in output:
-            return "intel"
-        if "h264_amf" in output or "hevc_amf" in output:
-            return "amd"
-        if "h264_videotoolbox" in output or "hevc_videotoolbox" in output:
-            return "mac"
-
-    except Exception as e:
-        print(f"Error detecting hardware acceleration: {e}")
-
-    return None
 
 
 def construct_ffmpeg_command(
