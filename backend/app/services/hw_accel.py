@@ -72,6 +72,13 @@ ENCODER_MAP = {
         "hwaccel": None,
         "hwaccel_output_format": None,
     },
+    "vaapi": {
+        "h264": "h264_vaapi",
+        "hevc": "hevc_vaapi",
+        "av1": "av1_vaapi",
+        "hwaccel": "vaapi",
+        "hwaccel_output_format": "vaapi",
+    },
 }
 
 
@@ -201,7 +208,44 @@ def _detect_gpus_linux() -> list[GPUDevice]:
                         gpus.append(GPUDevice(name=entry, vendor="amd"))
         except Exception:
             pass
+
+    if not any(g.vendor == "nvidia" for g in gpus):
+        vaapi_device = _detect_vaapi_device()
+        if vaapi_device:
+            gpus.append(vaapi_device)
+
     return gpus
+
+
+def _detect_vaapi_device() -> GPUDevice | None:
+    if not os.path.exists("/dev/dri"):
+        return None
+    try:
+        for entry in os.listdir("/dev/dri"):
+            if entry.startswith("renderD"):
+                try:
+                    result = subprocess.run(
+                        ["vainfo"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split("\n"):
+                            if "VAProfile" in line:
+                                name = "VAAPI Device"
+                                if "Intel" in result.stdout:
+                                    name = "Intel VAAPI"
+                                elif (
+                                    "AMD" in result.stdout or "Radeon" in result.stdout
+                                ):
+                                    name = "AMD VAAPI"
+                                return GPUDevice(name=name, vendor="vaapi")
+                except Exception:
+                    pass
+                break
+    except Exception:
+        pass
+    return None
 
 
 def _detect_gpus_macos() -> list[GPUDevice]:
@@ -300,7 +344,7 @@ def detect_hardware_info(enable_detection: bool = True) -> HardwareInfo:
     if not gpus:
         return HardwareInfo()
 
-    priority = ["nvidia", "amd", "intel", "apple"]
+    priority = ["nvidia", "amd", "intel", "vaapi", "apple"]
     gpus_sorted = sorted(
         gpus,
         key=lambda g: priority.index(g.vendor) if g.vendor in priority else 999,

@@ -58,13 +58,20 @@ def construct_ffmpeg_command(
                 video_codec = "h264_videotoolbox"
             elif video_codec == "libx265":
                 video_codec = "hevc_videotoolbox"
+        elif hw_type == "vaapi":
+            if video_codec == "libx264":
+                video_codec = "h264_vaapi"
+            elif video_codec == "libx265":
+                video_codec = "hevc_vaapi"
+            elif video_codec == "libaom-av1":
+                video_codec = "av1_vaapi"
 
     is_audio_only_output = container in ["mp3", "flac", "wav", "aac", "ogg"]
 
     # 容器兼容性检查
     if not is_audio_only_output and video_codec != "copy":
         is_hw_codec = any(
-            k in video_codec for k in ["nvenc", "qsv", "amf", "videotoolbox"]
+            k in video_codec for k in ["nvenc", "qsv", "amf", "videotoolbox", "vaapi"]
         )
         if not is_hw_codec:
             if container == "mp4" and video_codec not in [
@@ -111,6 +118,8 @@ def construct_ffmpeg_command(
                 command.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
             elif hw_type == "intel":
                 command.extend(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"])
+            elif hw_type == "vaapi":
+                command.extend(["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"])
 
     command.extend(["-analyzeduration", "100M", "-probesize", "100M"])
     command.extend(["-ignore_unknown"])
@@ -143,6 +152,8 @@ def construct_ffmpeg_command(
                 actual_hw_type = "amd"
             elif "videotoolbox" in video_codec:
                 actual_hw_type = "mac"
+            elif "vaapi" in video_codec:
+                actual_hw_type = "vaapi"
 
             preset_map = {
                 "nvidia": {"fast": "p1", "balanced": "p4", "quality": "p7"},
@@ -153,6 +164,7 @@ def construct_ffmpeg_command(
                 },
                 "amd": {"fast": "speed", "balanced": "balanced", "quality": "quality"},
                 "mac": {"fast": "speed", "balanced": "default", "quality": "quality"},
+                "vaapi": {"fast": "fast", "balanced": "medium", "quality": "slow"},
                 "cpu": {"fast": "superfast", "balanced": "medium", "quality": "slow"},
             }
 

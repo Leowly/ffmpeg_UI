@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from ..models import models
 from ..schemas import schemas
 from ..core.deps import get_current_user
-from .process import detect_hardware_encoder
+from ..services.hw_accel import detect_hardware_encoder
 
 router = APIRouter(
     tags=["Files"],
