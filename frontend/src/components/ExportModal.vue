@@ -550,15 +550,40 @@ const handleCancel = () => {
 
               <!-- 动态提示文案 -->
               <div class="ant-form-item-explain ant-form-item-explain-connected" style="margin-top: 6px; font-size: 12px; color: #888;">
-                <span v-if="formState.useHardwareAcceleration && fileStore.systemCapabilities.hardware_type === 'nvidia'">
-                  <template v-if="formState.preset === 'fast'">NVENC P1: 极速转码，适合预览。</template>
-                  <template v-if="formState.preset === 'balanced'">NVENC P4: 推荐，速度与画质的最佳平衡。</template>
-                  <template v-if="formState.preset === 'quality'">NVENC P7: 极致画质，速度较慢，适合存档。</template>
+                <span v-if="formState.useHardwareAcceleration">
+                  <template v-if="fileStore.systemCapabilities.hardware_type === 'nvidia'">
+                    <template v-if="formState.preset === 'fast'">NVENC P1: 最快速度，适合批量处理。</template>
+                    <template v-if="formState.preset === 'balanced'">NVENC P4: 推荐设置，速度与画质平衡。</template>
+                    <template v-if="formState.preset === 'quality'">NVENC P7: 最高画质，适合存档。</template>
+                  </template>
+                  <template v-else-if="fileStore.systemCapabilities.hardware_type === 'intel'">
+                    <template v-if="formState.preset === 'fast'">QSV Veryfast: 快速编码，适合预览。</template>
+                    <template v-if="formState.preset === 'balanced'">QSV Medium: 推荐设置，平衡画质与速度。</template>
+                    <template v-if="formState.preset === 'quality'">QSV Veryslow: 高质量编码，耗时较长。</template>
+                  </template>
+                  <template v-else-if="fileStore.systemCapabilities.hardware_type === 'amd'">
+                    <template v-if="formState.preset === 'fast'">AMF Speed: 优先速度编码。</template>
+                    <template v-if="formState.preset === 'balanced'">AMF Balanced: 推荐设置。</template>
+                    <template v-if="formState.preset === 'quality'">AMF Quality: 优先画质编码。</template>
+                  </template>
+                  <template v-else-if="fileStore.systemCapabilities.hardware_type === 'vaapi'">
+                    <template v-if="formState.preset === 'fast'">VAAPI Fast: 快速编码。</template>
+                    <template v-if="formState.preset === 'balanced'">VAAPI Medium: 推荐设置。</template>
+                    <template v-if="formState.preset === 'quality'">VAAPI Slow: 高质量编码。</template>
+                  </template>
+                  <template v-else-if="fileStore.systemCapabilities.hardware_type === 'apple'">
+                    <template v-if="formState.preset === 'fast'">VideoToolbox Speed: 优先速度编码。</template>
+                    <template v-if="formState.preset === 'balanced'">VideoToolbox Default: 推荐设置。</template>
+                    <template v-if="formState.preset === 'quality'">VideoToolbox Quality: 优先画质编码。</template>
+                  </template>
+                  <template v-else>
+                    硬件加速已启用
+                  </template>
                 </span>
-                <span v-else-if="!formState.useHardwareAcceleration">
-                  <template v-if="formState.preset === 'fast'">CPU Superfast: 文件积大，画质一般。</template>
-                  <template v-if="formState.preset === 'balanced'">CPU Medium: 标准设置。</template>
-                  <template v-if="formState.preset === 'quality'">CPU Slow: 压缩率高，画质好，但在老旧CPU上极慢。</template>
+                <span v-else>
+                  <template v-if="formState.preset === 'fast'">CPU Superfast: 快速编码，文件较大。</template>
+                  <template v-if="formState.preset === 'balanced'">CPU Medium: 推荐设置，平衡画质与文件大小。</template>
+                  <template v-if="formState.preset === 'quality'">CPU Slow: 高压缩率，画质最佳，但编码较慢。</template>
                 </span>
               </div>
             </a-form-item>
