@@ -1,7 +1,5 @@
-# 系统能力检测模块
-
 import asyncio
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from ..models import models
 from ..schemas import schemas
@@ -12,25 +10,15 @@ router = APIRouter(
     tags=["Files"],
 )
 
-SIMULATED_HW_TYPES = {
-    "nvidia": "nvidia",
-    "intel": "intel",
-    "amd": "amd",
-    "vaapi": "vaapi",
-    "apple": "apple",
-    "cpu": None,
-}
+DEBUG_HW_TYPE: str | None = None  # 可设置为 "cpu", "nvidia", "amd", "intel" , "apple" , "vaapi"等进行调试，或 None 进行自动检测
 
 
 @router.get("/capabilities", response_model=schemas.SystemCapabilities)
 async def get_system_capabilities(
     current_user: models.User = Depends(get_current_user),
-    simulate: str | None = Query(
-        None, description="模拟硬件类型: nvidia, intel, amd, vaapi, apple, cpu"
-    ),
 ):
-    if simulate and simulate in SIMULATED_HW_TYPES:
-        hw_type = SIMULATED_HW_TYPES[simulate]
+    if DEBUG_HW_TYPE is not None:
+        hw_type = DEBUG_HW_TYPE if DEBUG_HW_TYPE != "cpu" else None
         return schemas.SystemCapabilities(
             has_hardware_acceleration=bool(hw_type), hardware_type=hw_type
         )
