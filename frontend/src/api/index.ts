@@ -1,7 +1,7 @@
 // src/api/index.ts
 
 // 根据运行环境智能确定API基础URL
-let BASE_URL = import.meta.env.VITE_API_BASE_URL;
+let BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 // 检查是否在Capacitor环境中运行
 if (window.Capacitor) {

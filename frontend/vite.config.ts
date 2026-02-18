@@ -50,7 +50,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts: [vite_host],
       proxy: {
         '/api': {
-          target: baseUrl, // 使用加载到的变量
+          target: baseUrl,
           changeOrigin: true,
         },
         '/token': {
@@ -60,6 +60,10 @@ export default defineConfig(({ mode }) => {
         '/users': {
           target: baseUrl,
           changeOrigin: true,
+        },
+        '/ws': {
+          target: baseUrl,
+          ws: true,
         }
       }
     }

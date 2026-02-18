@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from . import models, crud
 from .core import config
 from .core.database import engine, SessionLocal
@@ -97,6 +98,17 @@ async def websocket_endpoint(websocket: WebSocket, task_id: int):
         manager.disconnect(task_id)
 
 
-@app.get("/", tags=["Root"])
-def read_root():
-    return {"message": "Welcome to the FFmpeg UI Backend"}
+FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+
+
+@app.get("/{full_path:path}", tags=["SPA"])
+async def serve_spa(full_path: str):
+    requested_file = FRONTEND_DIST / full_path
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+
+    index_file = FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+
+    return {"error": "Frontend not built"}
