@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import subprocess
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
@@ -281,6 +282,7 @@ def _detect_gpus_macos() -> list[GPUDevice]:
 
 
 _cached_gpus: list[GPUDevice] | None = None
+_gpu_detection_lock = threading.Lock()
 
 
 @lru_cache(maxsize=1)
@@ -301,16 +303,20 @@ def detect_gpus() -> list[GPUDevice]:
     if _cached_gpus is not None:
         return _cached_gpus
 
-    system = platform.system()
-    if system == "Windows":
-        _cached_gpus = _detect_gpus_windows()
-    elif system == "Linux":
-        _cached_gpus = _detect_gpus_linux()
-    elif system == "Darwin":
-        _cached_gpus = _detect_gpus_macos()
-    else:
-        _cached_gpus = []
-    return _cached_gpus
+    with _gpu_detection_lock:
+        if _cached_gpus is not None:
+            return _cached_gpus
+
+        system = platform.system()
+        if system == "Windows":
+            _cached_gpus = _detect_gpus_windows()
+        elif system == "Linux":
+            _cached_gpus = _detect_gpus_linux()
+        elif system == "Darwin":
+            _cached_gpus = _detect_gpus_macos()
+        else:
+            _cached_gpus = []
+        return _cached_gpus
 
 
 def detect_gpus_fast() -> list[GPUDevice]:
@@ -318,16 +324,20 @@ def detect_gpus_fast() -> list[GPUDevice]:
     if _cached_gpus is not None:
         return _cached_gpus
 
-    if platform.system() == "Windows":
-        nvidia = _detect_nvidia_smi()
-        if nvidia:
-            _cached_gpus = [nvidia]
+    with _gpu_detection_lock:
+        if _cached_gpus is not None:
             return _cached_gpus
 
-        _cached_gpus = _detect_gpus_windows_no_nvidia()
-        return _cached_gpus
+        if platform.system() == "Windows":
+            nvidia = _detect_nvidia_smi()
+            if nvidia:
+                _cached_gpus = [nvidia]
+                return _cached_gpus
 
-    return detect_gpus()
+            _cached_gpus = _detect_gpus_windows_no_nvidia()
+            return _cached_gpus
+
+        return detect_gpus()
 
 
 def check_ffmpeg_encoder(encoder: str) -> bool:

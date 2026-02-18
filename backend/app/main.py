@@ -3,6 +3,7 @@
 import os
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -27,6 +28,7 @@ from .core.config import UPLOAD_DIRECTORY
 from .core.limiter import limiter
 from .api import users, files, tasks
 from .services.processing import manager, worker
+from .services.hw_accel import detect_hardware_encoder
 
 # 只在非测试模式下创建表
 if os.environ.get("PYTEST_RUNNING") != "1":
@@ -64,6 +66,15 @@ app.include_router(tasks.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
+    def warmup_hw_detection():
+        hw_type = detect_hardware_encoder()
+        if hw_type:
+            print(f">>> Hardware acceleration detected: {hw_type.upper()}")
+        else:
+            print(">>> No hardware acceleration detected, using CPU encoding.")
+
+    threading.Thread(target=warmup_hw_detection, daemon=True).start()
+
     # Clean up stale tasks that were left in processing/pending state due to server restart
     db = SessionLocal()
     try:
