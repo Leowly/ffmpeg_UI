@@ -1,7 +1,7 @@
 [project]
-name = "backend"
+name = "ffmpeg-ui-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "FastAPI backend for FFmpeg UI - video processing web interface"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [

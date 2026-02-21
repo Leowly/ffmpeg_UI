@@ -131,11 +131,9 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
-import { useScreenLayout } from '@/composables/useScreenLayout'
 import { DownloadOutlined } from '@ant-design/icons-vue'
 
 const fileStore = useFileStore()
-const { spacing, fontSize, borderRadius } = useScreenLayout()
 
 // --- Refs for UI ---
 const workspaceRef = ref<HTMLElement | null>(null)
