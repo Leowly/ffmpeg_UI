@@ -63,14 +63,11 @@ jobs:
           cp backend/__init__.py dist/package/backend/
           cp -r runtime dist/package/
           cp .env.example dist/package/.env.example
-
-      - name: Create tarball
-        run: |
-          cd dist/package
-          tar -czf ../ffmpeg-ui.tar.gz .
+          cp README.md dist/package/
+          cp start.cmd dist/package/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-ui-dist
-          path: dist/ffmpeg-ui.tar.gz
+          path: dist/package
