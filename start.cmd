@@ -1,10 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo ========================================
-echo   FFmpeg UI Launcher
-echo ========================================
-echo.
+:: 切换到脚本所在目录，确保相对路径正确
+cd /d "%~dp0"
 
 :: Check FFmpeg
 echo [1/3] Checking FFmpeg...
