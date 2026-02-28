@@ -56,23 +56,12 @@ jobs:
       - name: Create distribution directory
         run: |
           mkdir -p dist/package/backend
-          
           cp -r frontend/dist dist/package/frontend/
-          
-          cp -r backend/app dist/package/backend/app
-        run: |
-          mkdir -p dist/package/frontend
-          mkdir -p dist/package/backend
-          
-          cp -r frontend/dist/* dist/package/frontend/dist/
-          
           cp -r backend/app dist/package/backend/app
           cp backend/pyproject.toml dist/package/backend/
           cp backend/uv.lock dist/package/backend/
           cp backend/__init__.py dist/package/backend/
-          
           cp -r runtime dist/package/
-          
           cp .env.example dist/package/.env.example
 
       - name: Create tarball
