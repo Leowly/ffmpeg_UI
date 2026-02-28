@@ -35,20 +35,30 @@ jobs:
 
       - name: Create distribution directory
         run: |
+          # 1. 显式创建所有层级的文件夹，确保目标路径存在
           mkdir -p dist/package/backend
-          # 1. 拷贝前端
+          mkdir -p dist/package/frontend
+          
+          # 2. 拷贝前端 (保持 dist 层级)
           cp -r frontend/dist dist/package/frontend/
           
-          # 2. 拷贝后端源码和配置文件 (直接拷贝，不需要安装 Python)
-          cp -r backend/app dist/package/backend/app
+          # 3. 拷贝后端 (源码、配置)
+          cp -r backend/app dist/package/backend/
           cp backend/pyproject.toml dist/package/backend/
           cp backend/uv.lock dist/package/backend/
           
-          # 3. 拷贝其他启动脚本
-          cp -r runtime dist/package/
+          # 4. 拷贝根目录文件
+          # 显式拷贝每一个文件，Linux 会强制执行，不存在会报错，存在就一定拷走
           cp .env.example dist/package/
           cp README.md dist/package/
           cp start.cmd dist/package/
+          
+          # 可选目录：如果存在才拷贝
+          if [ -d "runtime" ]; then cp -r runtime dist/package/; fi
+
+          # 5. 【关键调试步】在日志里列出所有文件，包括隐藏文件
+          echo "Checking files in dist/package:"
+          ls -la dist/package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
