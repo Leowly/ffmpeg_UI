@@ -33,32 +33,19 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      # 不再运行 uv sync，只利用 uv 导出标准依赖文件
-      - name: Export requirements.txt
-        working-directory: backend
-        run: uv export --format requirements-txt --no-dev -o requirements.txt
-
       - name: Create distribution directory
         run: |
           mkdir -p dist/package/backend
-          # 拷贝前端构建结果
+          # 1. 拷贝前端
           cp -r frontend/dist dist/package/frontend/
-          # 拷贝后端代码
+          
+          # 2. 拷贝后端源码和配置文件 (直接拷贝，不需要安装 Python)
           cp -r backend/app dist/package/backend/app
           cp backend/pyproject.toml dist/package/backend/
           cp backend/uv.lock dist/package/backend/
-          # 拷贝生成的依赖清单（重要！）
-          cp backend/requirements.txt dist/package/backend/
-          # 拷贝其他配置文件
-          cp -r runtime dist/package/ || true
+          
+          # 3. 拷贝其他启动脚本
+          cp -r runtime dist/package/
           cp .env.example dist/package/
           cp README.md dist/package/
           cp start.cmd dist/package/
