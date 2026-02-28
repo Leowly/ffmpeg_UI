@@ -1,7 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: 切换到脚本所在目录，确保相对路径正确
 cd /d "%~dp0"
 
 :: Check FFmpeg

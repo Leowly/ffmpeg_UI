@@ -352,7 +352,6 @@ export const useFileStore = defineStore('file', () => {
 
   async function downloadFile(fileId: string) {
     const downloadUrl = API_ENDPOINTS.DOWNLOAD_FILE(fileId)
-    const loadingMessage = message.loading('Preparing to download...', 0)
 
     try {
       const response = await axios.get(downloadUrl, {
@@ -381,10 +380,8 @@ export const useFileStore = defineStore('file', () => {
               data: base64data,
               directory: Directory.Documents,
             })
-            loadingMessage()
             message.success(`File "${filename}" has been saved to the "Documents" folder.`)
           } catch (_e) {
-            loadingMessage()
             console.error('Unable to save file', _e)
             message.error('Failed to save file. Please check app permissions.')
           }
@@ -398,11 +395,9 @@ export const useFileStore = defineStore('file', () => {
 
         window.URL.revokeObjectURL(link.href)
         document.body.removeChild(link)
-        loadingMessage()
         message.success(`File "${filename}" has started downloading.`)
       }
     } catch (error: unknown) {
-      loadingMessage()
       let errorMessage = 'Download failed.'
       if (isAxiosError(error)) {
         if (error.response && error.response.data) {
