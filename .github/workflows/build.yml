@@ -60,7 +60,7 @@ jobs:
           cp -r backend/app dist/package/backend/app
           cp backend/pyproject.toml dist/package/backend/
           cp backend/uv.lock dist/package/backend/
-          cp backend/__init__.py dist/package/backend/
+          cp -r backend/.venv dist/package/backend/.venv
           cp -r runtime dist/package/
           cp .env.example dist/package/.env.example
           cp README.md dist/package/
