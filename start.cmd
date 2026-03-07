@@ -3,6 +3,24 @@ setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
+:: Check and create .env if not exists
+echo Checking for .env file...
+if not exist ".env" (
+    if exist ".env.example" (
+        copy ".env.example" ".env" >nul
+        
+        :: Generate random SECRET_KEY using PowerShell
+        for /f "delims=" %%i in ('powershell -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([GUID]::NewGuid().ToString() + [GUID]::NewGuid().ToString())) | Out-String"') do set "RANDOM_SECRET=%%i"
+        
+        :: Replace SECRET_KEY value in .env
+        powershell -Command "(Get-Content '.env') -replace 'SECRET_KEY=.*', 'SECRET_KEY=!RANDOM_SECRET!' | Set-Content '.env'"
+        
+        echo .env file created with random SECRET_KEY
+    ) else (
+        echo Warning: .env.example not found, skipping .env creation
+    )
+)
+
 set INSTALL_DIR=%USERPROFILE%\.local\bin
 set TEMP_DIR=%TEMP%\ffmpeg_bootstrap
 
@@ -11,18 +29,14 @@ set ARIA2_URL=https://github.com/aria2/aria2/releases/download/release-1.37.0/ar
 set SEVENZIP_URL=https://www.7-zip.org/a/7zr.exe
 
 :: Check uv
+echo Checking for uv...
 where uv >nul 2>&1
 if %errorlevel% neq 0 (
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    where uv >nul 2>&1
-    if !errorlevel! neq 0 (
-        echo uv installation failed
-        pause
-        exit /b 1
-    )
 )
 
 :: Check FFmpeg
+echo Checking for FFmpeg...
 where ffmpeg >nul 2>&1
 if %errorlevel% neq 0 (
 
