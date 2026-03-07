@@ -5,24 +5,20 @@ cd /d "%~dp0"
 
 set INSTALL_DIR=%USERPROFILE%\.local\bin
 set TEMP_DIR=%TEMP%\ffmpeg_bootstrap
+
 set FFMPEG_URL=https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z
+set ARIA2_URL=https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip
 set SEVENZIP_URL=https://www.7-zip.org/a/7zr.exe
 
 :: Check uv
 where uv >nul 2>&1
 if %errorlevel% neq 0 (
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
     where uv >nul 2>&1
     if !errorlevel! neq 0 (
-        set "UV_PATH=%USERPROFILE%\.local\bin"
-        if exist "!UV_PATH!\uv.exe" (
-            set "PATH=!UV_PATH!;!PATH!"
-        ) else (
-            echo uv installation failed
-            pause
-            exit /b 1
-        )
+        echo uv installation failed
+        pause
+        exit /b 1
     )
 )
 
@@ -33,24 +29,18 @@ if %errorlevel% neq 0 (
     mkdir "%INSTALL_DIR%" >nul 2>nul
     mkdir "%TEMP_DIR%" >nul 2>nul
 
-    set ARCHIVE=%TEMP_DIR%\ffmpeg.7z
-    set SEVENZIP=%TEMP_DIR%\7zr.exe
+    cd /d "%TEMP_DIR%"
 
-    powershell -Command "Invoke-WebRequest '%FFMPEG_URL%' -OutFile '%ARCHIVE%'"
-    if not exist "%ARCHIVE%" (
-        echo ffmpeg download failed
-        pause
-        exit /b 1
-    )
+    powershell -Command "Invoke-WebRequest '%ARIA2_URL%' -OutFile aria2.zip"
+    powershell -Command "Expand-Archive aria2.zip -DestinationPath aria2tmp"
 
-    powershell -Command "Invoke-WebRequest '%SEVENZIP_URL%' -OutFile '%SEVENZIP%'"
-    if not exist "%SEVENZIP%" (
-        echo extractor download failed
-        pause
-        exit /b 1
-    )
+    for /r aria2tmp %%f in (aria2c.exe) do copy "%%f" aria2c.exe >nul
 
-    "%SEVENZIP%" x "%ARCHIVE%" -o"%TEMP_DIR%" -y >nul
+    aria2c.exe -x16 -s16 -k1M "%FFMPEG_URL%" -o ffmpeg.7z
+
+    powershell -Command "Invoke-WebRequest '%SEVENZIP_URL%' -OutFile 7zr.exe"
+
+    7zr.exe x ffmpeg.7z -y >nul
 
     del "%INSTALL_DIR%\ffmpeg.exe" >nul 2>&1
     del "%INSTALL_DIR%\ffprobe.exe" >nul 2>&1
@@ -60,13 +50,15 @@ if %errorlevel% neq 0 (
         copy "%%f" "%INSTALL_DIR%" >nul
     )
 
-    if not exist "%INSTALL_DIR%\ffmpeg.exe" (
-        echo ffmpeg installation failed
-        pause
-        exit /b 1
-    )
+    del aria2.zip >nul 2>&1
+    del aria2c.exe >nul 2>&1
+    del ffmpeg.7z >nul 2>&1
+    del 7zr.exe >nul 2>&1
 
-    rmdir /s /q "%TEMP_DIR%"
+    rmdir /s /q aria2tmp >nul 2>&1
+    rmdir /s /q "%TEMP_DIR%" >nul 2>&1
+
+    cd /d "%~dp0"
 )
 
 uv run --project backend python runtime/run_backend.py
