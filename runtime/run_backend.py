@@ -16,6 +16,8 @@ from pathlib import Path
 # Project root directory (where run.py and backend/ are located)
 project_root = Path(__file__).parent.parent
 
+# Add project root to sys.path so we can import backend module
+sys.path.insert(0, str(project_root))
 
 def setup_event_loop():
     """Configure event loop policy based on platform."""

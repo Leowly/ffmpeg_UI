@@ -7,13 +7,14 @@ cd /d "%~dp0"
 echo Checking for .env file...
 if not exist ".env" (
     if exist ".env.example" (
-        copy ".env.example" ".env" >nul
+        :: Copy with UTF-8 encoding using PowerShell
+        powershell -Command "Get-Content '.env.example' -Encoding UTF8 | Set-Content '.env' -Encoding UTF8"
         
         :: Generate random SECRET_KEY using PowerShell
         for /f "delims=" %%i in ('powershell -Command "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([GUID]::NewGuid().ToString() + [GUID]::NewGuid().ToString())) | Out-String"') do set "RANDOM_SECRET=%%i"
         
-        :: Replace SECRET_KEY value in .env
-        powershell -Command "(Get-Content '.env') -replace 'SECRET_KEY=.*', 'SECRET_KEY=!RANDOM_SECRET!' | Set-Content '.env'"
+        :: Replace SECRET_KEY value in .env with UTF-8 encoding
+        powershell -Command "(Get-Content '.env' -Encoding UTF8) -replace 'SECRET_KEY=.*', ('SECRET_KEY=' + '!RANDOM_SECRET!') | Set-Content '.env' -Encoding UTF8"
         
         echo .env file created with random SECRET_KEY
     ) else (
