@@ -17,6 +17,9 @@ ENABLE_HW_ACCEL_DETECTION = (
     os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower() == "true"
 )
 
+# 是否启用热重载 (默认 False)
+RELOAD = os.environ.get("RELOAD", "false").lower() == "true"
+
 UPLOAD_DIRECTORY = "./backend/workspaces"
 
 

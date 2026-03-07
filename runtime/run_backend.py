@@ -27,22 +27,31 @@ def setup_event_loop():
         print(f">>> [runtime] Running on {sys.platform} - no special policy needed")
 
 
-def start_backend(host: str = "127.0.0.1", port: int = 8000, reload: bool = True):
+def start_backend(
+    host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None
+):
     """
     Start the FastAPI backend server.
 
     Args:
         host: Server host address
         port: Server port
-        reload: Enable auto-reload for development
+        reload: Override reload setting from config if provided
     """
     setup_event_loop()
+
+    # Import config to get reload setting
+    from backend.app.core.config import RELOAD as config_reload
+
+    # Use parameter if provided, otherwise use config value
+    use_reload = reload if reload is not None else config_reload
+
     print(f">>> [runtime] Starting Uvicorn server at {host}:{port}...")
     uvicorn.run(
         "backend.app.main:app",
         host=host,
         port=port,
-        reload=reload,
+        reload=use_reload,
         app_dir=str(project_root),
     )
 
