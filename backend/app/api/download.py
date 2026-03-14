@@ -83,11 +83,23 @@ async def get_file_info(
 
         try:
             raw_data = json.loads(stdout)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=500, detail=f"ffprobe returned invalid JSON: {str(e)}"
+            )
+
+        try:
             clean_data = schemas.FileInfoResponse.model_validate(raw_data)
             return clean_data
-        except (json.JSONDecodeError, Exception):
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"ffprobe output validation failed: {str(e)}")
+            logger.debug(f"Raw ffprobe output: {stdout[:500]}")
             raise HTTPException(
-                status_code=500, detail="Could not parse ffprobe output"
+                status_code=500,
+                detail=f"ffprobe output doesn't match expected schema: {str(e)}",
             )
 
     except FileNotFoundError:

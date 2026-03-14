@@ -70,13 +70,13 @@
 
         <!-- 音频流通用信息 -->
         <template v-if="audioStream">
-          <a-descriptions-item label="音频编码"
-            >{{ audioStream.codec_name }} ({{ audioStream.codec_long_name }})</a-descriptions-item
-          >
+          <a-descriptions-item label="音频编码">{{ audioStream.codec_name }}
+            <template v-if="audioStream.codec_long_name">({{ audioStream.codec_long_name }})</template>
+          </a-descriptions-item>
           <a-descriptions-item label="采样率">{{ audioStream.sample_rate }} Hz</a-descriptions-item>
-          <a-descriptions-item label="声道"
-            >{{ audioStream.channels }} ({{ audioStream.channel_layout }})</a-descriptions-item
-          >
+          <a-descriptions-item label="声道">{{ audioStream.channels }}
+            <template v-if="audioStream.channel_layout">({{ audioStream.channel_layout }})</template>
+          </a-descriptions-item>
         </template>
 
         <!-- 封面专属信息 -->
