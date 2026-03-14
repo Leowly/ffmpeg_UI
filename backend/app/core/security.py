@@ -67,3 +67,26 @@ def verify_token(token: str, credentials_exception) -> dict:
         return payload
     except JWTError:
         raise credentials_exception
+
+
+def create_download_token(file_id: int, user_id: int, expires_minutes: int = 5) -> str:
+    """生成临时下载签名链接用的 token"""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    payload = {
+        "file_id": file_id,
+        "user_id": user_id,
+        "exp": expire,
+        "type": "download",
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_download_token(token: str) -> Optional[dict]:
+    """验证临时下载 token"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "download":
+            return None
+        return payload
+    except JWTError:
+        return None

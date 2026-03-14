@@ -53,9 +53,17 @@ def login_for_access_token(
         success_response = schemas.APIResponse[schemas.Token](
             success=True, data=token_data, message="登录成功！"
         )
-        return JSONResponse(
+        response = JSONResponse(
             status_code=status.HTTP_200_OK, content=success_response.model_dump()
         )
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 24 * 7,
+        )
+        return response
 
     except SQLAlchemyError:
         error_response = schemas.APIResponse(
@@ -86,3 +94,10 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.get("/users/me", response_model=schemas.User, tags=["Users"])
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/logout", tags=["Users"])
+def logout():
+    response = JSONResponse(content={"message": "Logged out successfully"})
+    response.delete_cookie(key="access_token")
+    return response

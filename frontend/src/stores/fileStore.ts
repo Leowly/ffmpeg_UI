@@ -4,8 +4,6 @@ import { ref, type Ref, computed, onUnmounted } from 'vue'
 import axios, { isAxiosError } from 'axios'
 import { API_ENDPOINTS } from '@/api'
 import { message } from 'ant-design-vue'
-import { Capacitor } from '@capacitor/core'
-import { Filesystem, Directory } from '@capacitor/filesystem'
 
 // --- Types ---
 export interface UserFile {
@@ -351,64 +349,27 @@ export const useFileStore = defineStore('file', () => {
   }
 
   async function downloadFile(fileId: string) {
-    const downloadUrl = API_ENDPOINTS.DOWNLOAD_FILE(fileId)
-
     try {
-      const response = await axios.get(downloadUrl, {
-        responseType: 'blob',
-      })
+      // Step 1: Get temporary download URL (with auth)
+      const tempUrlResponse = await axios.get<{ temp_url: string }>(
+        API_ENDPOINTS.DOWNLOAD_TEMP(fileId)
+      )
+      const tempUrl = tempUrlResponse.data.temp_url
 
-      const contentDisposition = response.headers['content-disposition']
-      let filename = 'downloaded_file'
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/)
-        if (filenameMatch && filenameMatch.length > 1) {
-          filename = decodeURIComponent(filenameMatch[1])
-        }
-      }
-
-      const blob = new Blob([response.data], { type: response.headers['content-type'] })
-
-      if (Capacitor.isNativePlatform()) {
-        const reader = new FileReader()
-        reader.readAsDataURL(blob)
-        reader.onloadend = async () => {
-          const base64data = reader.result as string
-          try {
-            await Filesystem.writeFile({
-              path: filename,
-              data: base64data,
-              directory: Directory.Documents,
-            })
-            message.success(`File "${filename}" has been saved to the "Documents" folder.`)
-          } catch (_e) {
-            console.error('Unable to save file', _e)
-            message.error('Failed to save file. Please check app permissions.')
-          }
-        }
-      } else {
-        const link = document.createElement('a')
-        link.href = window.URL.createObjectURL(blob)
-        link.download = filename
-        document.body.appendChild(link)
-        link.click()
-
-        window.URL.revokeObjectURL(link.href)
-        document.body.removeChild(link)
-        message.success(`File "${filename}" has started downloading.`)
-      }
+      // Step 2: Create hidden link to trigger download
+      const link = document.createElement('a')
+      link.href = tempUrl
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      message.success('Download started.')
     } catch (error: unknown) {
       let errorMessage = 'Download failed.'
       if (isAxiosError(error)) {
         if (error.response && error.response.data) {
-          try {
-            const errorText = await (error.response.data as Blob).text()
-            const errorJson = JSON.parse(errorText)
-            errorMessage = errorJson.detail || 'Could not parse error details'
-          } catch (e) {
-            console.error('Unable to parse error blob', e)
-            errorMessage = error.message || 'An unknown network error occurred'
-          }
+          errorMessage = (error.response.data as { detail?: string }).detail || error.message
+        } else {
+          errorMessage = error.message
         }
       } else if (error instanceof Error) {
         errorMessage = error.message

@@ -17,7 +17,7 @@ if (window.Capacitor) {
 }
 
 export const API_ENDPOINTS = {
-TOKEN: `${BASE_URL}/token`,
+  TOKEN: `${BASE_URL}/token`,
   CREATE_USER: `${BASE_URL}/users/`,
   CURRENT_USER: `${BASE_URL}/users/me`,
   FILE_LIST: `${BASE_URL}/api/files`,
@@ -28,8 +28,7 @@ TOKEN: `${BASE_URL}/token`,
   TASK_LIST: `${BASE_URL}/api/tasks`,
   GET_TASK_DETAILS: (taskId: number) => `${BASE_URL}/api/task-status/${taskId}`,
   DELETE_TASK: (taskId: number) => `${BASE_URL}/api/tasks/${taskId}`,
-  DOWNLOAD_FILE: (fileId: string) => `${BASE_URL}/api/download-file/${fileId}`,
-  DOWNLOAD_TASK: (taskId: number) => `${BASE_URL}/api/download-task/${taskId}`,
+  DOWNLOAD_TEMP: (fileId: string) => `${BASE_URL}/api/download-temp/${fileId}`,
   GET_CAPABILITIES: `${BASE_URL}/api/capabilities`,
   WS_PROGRESS: (taskId: number) => {
     // 自动处理相对路径或绝对路径

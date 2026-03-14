@@ -6,8 +6,8 @@ import os
 from typing import List, Tuple
 
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..crud import crud
@@ -15,6 +15,8 @@ from ..models import models
 from ..schemas import schemas
 from ..core.deps import get_current_user, get_db
 from ..core.config import reconstruct_file_path
+from ..core.security import create_download_token, verify_download_token
+from ..core.database import SessionLocal
 
 router = APIRouter(
     tags=["Files"],
@@ -157,6 +159,7 @@ async def read_user_files(
 @router.get("/download-file/{file_id}")
 async def download_file(
     file_id: str,
+    token: str | None = None,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -188,6 +191,77 @@ async def download_file(
                 yield chunk
 
     headers = {"Content-Disposition": f'attachment; filename="{db_file.filename}"'}
+    return StreamingResponse(
+        file_iterator(file_path), media_type="application/octet-stream", headers=headers
+    )
+
+
+@router.get("/download-temp/{file_id}")
+async def get_temp_download_link(
+    file_id: str,
+    current_user: models.User = Depends(get_current_user),
+    request: Request = None,
+):
+    try:
+        file_id_int = int(file_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid file ID")
+
+    db = SessionLocal()
+    try:
+        db_file = crud.get_file_by_id(db, file_id=file_id_int)
+        if not db_file or db_file.owner_id != current_user.id:
+            raise HTTPException(status_code=404, detail="File not found")
+    finally:
+        db.close()
+
+    token = create_download_token(file_id_int, int(current_user.id), expires_minutes=5)
+    base_url = str(request.base_url).rstrip("/")
+    temp_url = f"{base_url}/api/temp-download/{token}"
+    return {"temp_url": temp_url}
+
+
+@router.get("/temp-download/{token}")
+async def temp_download(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """临时下载端点（验证签名，无需认证）"""
+    payload = verify_download_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired download link")
+
+    file_id = payload.get("file_id")
+    user_id = payload.get("user_id")
+
+    db_file = crud.get_file_by_id(db, file_id=file_id)
+    if not db_file or db_file.owner_id != user_id:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_path = db_file.filepath
+    loop = asyncio.get_running_loop()
+    resolved = await loop.run_in_executor(
+        None, reconstruct_file_path, file_path, user_id
+    )
+    if resolved:
+        file_path = resolved
+    else:
+        raise HTTPException(status_code=404, detail="File not found on server")
+
+    file_size = await loop.run_in_executor(None, os.path.getsize, file_path)
+
+    async def file_iterator(path: str, chunk_size: int = 1024 * 1024):
+        async with aiofiles.open(path, "rb") as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{db_file.filename}"',
+        "Content-Length": str(file_size),
+    }
     return StreamingResponse(
         file_iterator(file_path), media_type="application/octet-stream", headers=headers
     )

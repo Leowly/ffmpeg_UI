@@ -118,7 +118,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   function logout() {
     const fileStore = useFileStore()
-    fileStore.resetStore() // <--- 核心修复：清理文件和Socket状态
+    fileStore.resetStore()
+
+    axios.post(API_ENDPOINTS.TOKEN.replace('/token', '/logout')).catch(() => {})
 
     token.value = null
     user.value = null
