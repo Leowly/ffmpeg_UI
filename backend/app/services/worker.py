@@ -1,6 +1,7 @@
 # backend/app/services/worker.py
 
 import asyncio
+import logging
 
 """Global worker queue and worker coroutine.
 
@@ -12,6 +13,7 @@ extensive polling.
 """
 
 global_queue: asyncio.Queue = asyncio.Queue()
+logger = logging.getLogger(__name__)
 
 
 async def worker():
@@ -19,8 +21,10 @@ async def worker():
     while True:
         task_details = await global_queue.get()
 
-        print(
-            f"Worker picked up task: {task_details['task_id']} for user {task_details['owner_id']}"
+        logger.info(
+            "Worker picked up task: %s for user %s",
+            task_details["task_id"],
+            task_details["owner_id"],
         )
         try:
             from .ffmpeg_runner import run_ffmpeg_process
@@ -36,8 +40,9 @@ async def worker():
                 final_display_name=task_details["final_display_name"],
             )
         except Exception as e:
-            print(
-                f"An error occurred while processing task {task_details['task_id']}: {e}"
+            logger.exception(
+                "An error occurred while processing task %s", task_details["task_id"]
             )
         finally:
+            logger.debug("Task %s completed", task_details["task_id"])
             global_queue.task_done()

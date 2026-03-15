@@ -9,6 +9,7 @@ import uuid
 from typing import List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
+import logging
 from sqlalchemy.orm import Session
 
 from ..crud import crud
@@ -19,6 +20,8 @@ from ..services.processing import manager
 from ..services.worker import global_queue
 from ..services.hw_accel import detect_hardware_encoder
 from ..core.config import reconstruct_file_path
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["Files"],
@@ -271,6 +274,11 @@ async def process_files(
         }
         # Enqueue task into the global worker queue
         await global_queue.put(task_details)
+        logger.info(
+            "Enqueued task_id=%s for owner_id=%s into global worker queue",
+            db_task.id,
+            current_user.id,
+        )
 
         created_tasks.append(db_task)
 
