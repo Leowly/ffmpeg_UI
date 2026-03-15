@@ -118,7 +118,7 @@ ALLOWED_EXTENSIONS = {
 
 FILE_SIGNATURES = {
     b"ftyp": {"mp4", "m4v", "mov"},
-    b"PK\x03\x04": {"mkv"},
+    b"\x1a\x45\xdf\xa3": {"mkv", "webm"},
     b"\xff\xd8\xff": {"jpg", "jpeg"},
     b"\x89PNG\r\n\x1a\n": {"png"},
     b"RIFF": {"avi", "webm", "mkv", "wave", "wav"},
@@ -129,7 +129,6 @@ FILE_SIGNATURES = {
     b"\xff\xf5": {"mp3"},
     b"fLaC": {"flac"},
     b"MThd": {"mid", "midi"},
-    b"\x1aE\xdf\xa3": {"webm", "mkv"},
     b"\x30\x26\xb2\x75": {"wmv", "asf"},
 }
 
