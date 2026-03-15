@@ -22,22 +22,26 @@ def get_db():
         db.close()
 
 
-async def get_token_from_query_or_header(request: Request) -> str:
-    token = request.query_params.get("token")
-    if token:
-        return token
+async def get_token_from_header_or_cookie(request: Request) -> str:
+    """
+    获取访问令牌（拒绝 URL Query 传参以防日志泄露）
+    优先从 Authorization Header 获取，其次从 HttpOnly Cookie 获取
+    """
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header[7:]
+    
     cookie_token = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
+        
     return ""
 
 
 def get_current_user(
     db: Session = Depends(get_db),
-    token: str = Depends(get_token_from_query_or_header),
+    # 【修改点】：对应修改依赖注入的函数名
+    token: str = Depends(get_token_from_header_or_cookie),
 ) -> models_module.User:
     if not token:
         raise HTTPException(
