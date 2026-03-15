@@ -15,7 +15,8 @@ from ..crud import crud
 from ..models import models
 from ..schemas import schemas
 from ..core.deps import get_current_user, get_db
-from ..services.processing import manager, user_task_queues
+from ..services.processing import manager
+from ..services.worker import global_queue
 from ..services.hw_accel import detect_hardware_encoder
 from ..core.config import reconstruct_file_path
 
@@ -268,8 +269,8 @@ async def process_files(
             "final_display_name": final_display_name,
             "owner_id": current_user.id,
         }
-        user_queue = user_task_queues[current_user.id]
-        await user_queue.put(task_details)
+        # Enqueue task into the global worker queue
+        await global_queue.put(task_details)
 
         created_tasks.append(db_task)
 
