@@ -1,5 +1,5 @@
 from .manager import ConnectionManager, manager
-from .worker import worker, global_queue
+from .worker import worker, enqueue_task, user_queues, active_users
 from .ffmpeg_runner import (
     run_ffmpeg_process,
     run_ffmpeg_blocking,
@@ -11,7 +11,9 @@ __all__ = [
     "ConnectionManager",
     "manager",
     "worker",
-    "global_queue",
+    "enqueue_task",
+    "user_queues",
+    "active_users",
     "run_ffmpeg_process",
     "run_ffmpeg_blocking",
     "terminate_task_process",
