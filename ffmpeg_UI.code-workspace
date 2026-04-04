@@ -14,11 +14,11 @@
 		}
 	],
 	"settings": {
-		"java.configuration.updateBuildConfiguration": "automatic",
 		"python.analysis.diagnosticMode": "workspace",
-		"python.analysis.typeCheckingMode": "basic",
-		"python.analysis.ignore": ["**/.venv/**", "**/site-packages/**"],
-		"python.linting.enabled": true,
-		"python.linting.ruffEnabled": true
+		"python.analysis.typeCheckingMode": "off",
+		"python.analysis.ignore": [
+			"**/.venv/**",
+			"**/site-packages/**"
+		],
 	}
 }
