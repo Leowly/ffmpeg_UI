@@ -147,7 +147,6 @@ def update_task(
     task_id: int,
     status: str | None = None,
     details: str | None = None,
-    progress: int | None = None,
     result_file_id: int | None = None,
 ):
     db_task = (
@@ -160,11 +159,6 @@ def update_task(
             db_task.status = status
         if details:
             db_task.details = details
-        if progress is not None:
-            try:
-                db_task.progress = int(progress)
-            except Exception:
-                pass
         if result_file_id is not None:
             db_task.result_file_id = result_file_id
         db.commit()

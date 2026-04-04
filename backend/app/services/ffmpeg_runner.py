@@ -87,14 +87,6 @@ def run_ffmpeg_blocking(
                                         main_loop,
                                     )
                                     future.result()
-
-                                    db = SessionLocal()
-                                    try:
-                                        crud.update_task(
-                                            db, task_id=task_id, progress=progress
-                                        )
-                                    finally:
-                                        db.close()
                                 last_progress = progress
                                 last_update_time = time.time()
 
@@ -164,7 +156,7 @@ async def run_ffmpeg_process(
         logger.info(
             f"run_ffmpeg_process: start task_id={task_id}, command={display_command}"
         )
-        crud.update_task(db, task_id=task_id, status="processing", progress=0)
+        crud.update_task(db, task_id=task_id, status="processing")
 
         loop = asyncio.get_running_loop()
 
@@ -203,7 +195,6 @@ async def run_ffmpeg_process(
                     task_id=task_id,
                     status="completed",
                     details=full_stderr,
-                    progress=100,
                     result_file_id=new_db_file.id if new_db_file else None,
                 )
                 await conn_manager.send_progress(task_id, 100, "completed")

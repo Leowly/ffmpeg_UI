@@ -134,7 +134,6 @@ class Task(TaskBase):
     status: str
     details: str | None
     owner_id: int
-    progress: int
     result_file_id: int | None = None
     result_file: Optional["File"] = None
 

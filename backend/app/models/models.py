@@ -36,16 +36,11 @@ class ProcessingTask(Base):
     __tablename__ = "processing_tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-    # 使用 text 类型以存储可能很长的 ffmpeg 命令
     ffmpeg_command = Column(Text, nullable=False)
-    source_filename = Column(
-        String, nullable=True, default=""
-    )  # 用于存储源文件名，并设置默认值
-    output_path = Column(String, nullable=True)  # 用于存储输出文件路径
-    progress = Column(Integer, default=0)  # 0-100 百分比进度
-    # pending, processing, completed, failed
+    source_filename = Column(String, nullable=True, default="")
+    output_path = Column(String, nullable=True)
     status = Column(String, default="pending", index=True)
-    details = Column(Text, nullable=True)  # 用于存储日志或错误信息
+    details = Column(Text, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
     # 与结果文件的关联
