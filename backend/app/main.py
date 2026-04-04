@@ -1,14 +1,16 @@
 # backend/app/main.py
 
 import os
+import sys
 import asyncio
 import logging
 import threading
 from pathlib import Path
-from dotenv import load_dotenv
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
+from dotenv import load_dotenv
+
 load_dotenv(env_path)
 
 # 配置日志
@@ -17,6 +19,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Windows 事件循环策略配置（必须在导入 uvicorn/FastAPI 之前）
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -123,3 +129,28 @@ async def serve_spa(full_path: str):
         return FileResponse(index_file)
 
     return {"error": "Frontend not built"}
+
+
+def start(host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None):
+    """
+    Start the FastAPI backend server.
+
+    Args:
+        host: Server host address
+        port: Server port
+        reload: Override reload setting from config if provided
+    """
+    import uvicorn
+    from .core.config import RELOAD as config_reload
+
+    use_reload = reload if reload is not None else config_reload
+    uvicorn.run(
+        "backend.app.main:app",
+        host=host,
+        port=port,
+        reload=use_reload,
+    )
+
+
+if __name__ == "__main__":
+    start()

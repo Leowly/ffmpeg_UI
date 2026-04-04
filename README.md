@@ -37,31 +37,25 @@
 
 ```
 .
-├── backend/         # Python FastAPI 后端应用
-├── frontend/        # Vue 3 Vite 前端应用
-├── runtime/         # 启动层（平台配置、事件循环、uvicorn 启动）
-└── run.py           # 项目根入口（委托 runtime/run给_backend.py）
+├── backend/app/     # Python FastAPI 后端应用（包含唯一入口 main.py）
+└── frontend/        # Vue 3 Vite 前端应用
 ```
 
 ### 目录职责
 
 | 目录 | 职责 | 说明 |
 |------|------|------|
-| `backend/` | **ASGI 应用定义** | FastAPI 路由、模型、业务逻辑 |
-| `runtime/` | **进程/生命周期管理** | 平台判断、事件循环配置、uvicorn 启动参数 |
-| `run.py` | **项目入口** | 轻量代理，委托给 runtime 层 |
+| `backend/app/` | **FastAPI 后端** | 路由、模型、业务逻辑、唯一入口 |
+| `frontend/` | **Vue 3 前端** | Web 界面 |
 
 ### 启动方式
 
 ```bash
-# 推荐方式：通过项目根目录启动
-python run.py
+# 使用 uv 运行（推荐）
+uv run --project backend -m backend.app.main
 
-# 或直接使用 runtime 启动脚本
-python runtime/run_backend.py
-
-# 或使用 uv 运行（需要设置事件循环策略）
-uv run uvicorn backend.main:app --reload
+# 或使用 uv 运行 uvicorn
+uv run --project backend -m uvicorn backend.app.main:app --reload
 ```
 
 ## 📦 生产构建
