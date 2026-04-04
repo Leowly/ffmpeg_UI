@@ -33,7 +33,8 @@ from app.core.database import engine, SessionLocal
 from app.core.config import UPLOAD_DIRECTORY
 from app.core.limiter import limiter
 from app.api import users, files, tasks
-from app.services.processing import manager, worker
+from app.services.processing import manager
+from app.services.worker import worker
 from app.services.hw_accel import detect_hardware_encoder
 
 # 只在非测试模式下创建表
@@ -78,8 +79,10 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    asyncio.create_task(worker())
-    print(">>> Background worker started.")
+    max_concurrent_workers = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
+    for i in range(max_concurrent_workers):
+        asyncio.create_task(worker(worker_id=i + 1))
+    print(f">>> {max_concurrent_workers} background worker(s) started.")
 
     yield
 

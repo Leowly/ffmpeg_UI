@@ -14,7 +14,7 @@ from app.models import models
 from app.schemas import schemas
 from app.core.deps import get_current_user, get_db
 from app.services.processing import manager
-from app.services.worker import global_queue
+from app.services.worker import enqueue_task
 from app.services.hw_accel import detect_hardware_encoder
 
 logger = logging.getLogger(__name__)
@@ -268,10 +268,9 @@ async def process_files(
             "final_display_name": final_display_name,
             "owner_id": current_user.id,
         }
-        # Enqueue task into the global worker queue
-        await global_queue.put(task_details)
+        await enqueue_task(current_user.id, task_details)
         logger.info(
-            "Enqueued task_id=%s for owner_id=%s into global worker queue",
+            "Enqueued task_id=%s for user_id=%s",
             db_task.id,
             current_user.id,
         )
