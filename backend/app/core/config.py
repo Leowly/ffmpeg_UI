@@ -20,7 +20,7 @@ ENABLE_HW_ACCEL_DETECTION = (
 # 是否启用热重载 (默认 False)
 RELOAD = os.environ.get("RELOAD", "false").lower() == "true"
 
-UPLOAD_DIRECTORY = BASE_DIR / "workspaces"
+UPLOAD_DIRECTORY = BASE_DIR / "data" / "workspaces"
 
 
 # --- 新增：文件大小解析逻辑 ---
@@ -135,18 +135,23 @@ FILE_SIGNATURES = {
 
 @lru_cache(maxsize=128)
 def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
-    # 确保上传目录存在
-    os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
+    # 处理 Windows 反斜杠
+    normalized_path = stored_path.replace("\\", "/")
 
-    if os.path.exists(stored_path):
-        return stored_path
+    # 尝试直接使用存储的路径
+    if os.path.exists(normalized_path):
+        return normalized_path
 
-    expected_user_dir = os.path.join(UPLOAD_DIRECTORY, str(user_id))
-    unique_filename = os.path.basename(stored_path)
-    reconstructed_file_path = os.path.join(expected_user_dir, unique_filename)
+    # 尝试相对于项目根目录
+    candidate = BASE_DIR / normalized_path
+    if candidate.exists():
+        return str(candidate)
 
-    if os.path.exists(reconstructed_file_path):
-        return reconstructed_file_path
+    # 尝试在用户目录下查找
+    filename = os.path.basename(normalized_path)
+    user_candidate = UPLOAD_DIRECTORY / str(user_id) / filename
+    if user_candidate.exists():
+        return str(user_candidate)
 
     return None
 
