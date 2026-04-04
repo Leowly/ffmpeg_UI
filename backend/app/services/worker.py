@@ -39,7 +39,7 @@ async def worker():
                 final_output_path=task_details["final_output_path"],
                 final_display_name=task_details["final_display_name"],
             )
-        except Exception as e:
+        except Exception:
             logger.exception(
                 "An error occurred while processing task %s", task_details["task_id"]
             )

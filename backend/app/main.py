@@ -28,8 +28,7 @@ if sys.platform == "win32":
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from app import models, crud
-from app.core import config
+from app import models
 from app.core.database import engine, SessionLocal
 from app.core.config import UPLOAD_DIRECTORY
 from app.core.limiter import limiter

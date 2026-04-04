@@ -2,6 +2,14 @@
   "python.analysis.extraPaths": [
     "./"
   ],
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.ignore": ["**/.venv/**", "**/site-packages/**"],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false,
+  "python.linting.ruffEnabled": true,
+  "python.linting.ruffArgs": ["--select=E,F,W,C90,I"],
+  "python.formatting.provider": "ruff",
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
     "tsconfig.json": "tsconfig.*.json, env.d.ts",

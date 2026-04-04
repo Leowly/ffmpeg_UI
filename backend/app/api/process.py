@@ -1,12 +1,9 @@
 # FFmpeg处理模块
 
-import asyncio
-import json
 import os
 import shlex
-import subprocess
 import uuid
-from typing import List, Tuple
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 import logging
@@ -19,7 +16,6 @@ from app.core.deps import get_current_user, get_db
 from app.services.processing import manager
 from app.services.worker import global_queue
 from app.services.hw_accel import detect_hardware_encoder
-from app.core.config import reconstruct_file_path
 
 logger = logging.getLogger(__name__)
 
