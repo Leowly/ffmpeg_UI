@@ -1,16 +1,18 @@
 import asyncio
 from fastapi import APIRouter, Depends
 
-from ..models import models
-from ..schemas import schemas
-from ..core.deps import get_current_user
-from ..services.hw_accel import detect_hardware_encoder
+from app.models import models
+from app.schemas import schemas
+from app.core.deps import get_current_user
+from app.services.hw_accel import detect_hardware_encoder
 
 router = APIRouter(
     tags=["Files"],
 )
 
-DEBUG_HW_TYPE: str | None = None  # 可设置为 "cpu", "nvidia", "amd", "intel" , "apple" , "vaapi"等进行调试，或 None 进行自动检测
+DEBUG_HW_TYPE: str | None = (
+    None  # 可设置为 "cpu", "nvidia", "amd", "intel" , "apple" , "vaapi"等进行调试，或 None 进行自动检测
+)
 
 
 @router.get("/capabilities", response_model=schemas.SystemCapabilities)

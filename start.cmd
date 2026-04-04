@@ -77,6 +77,6 @@ if %errorlevel% neq 0 (
     cd /d "%~dp0"
 )
 
-uv run --project backend -m backend.app.main
+cd /d "%~dp0backend" && uv run python -m app.main
 
 pause

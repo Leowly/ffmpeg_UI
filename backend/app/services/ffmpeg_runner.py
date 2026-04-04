@@ -11,9 +11,9 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Dict, Tuple
 
-from .. import crud, schemas
-from ..core.database import SessionLocal
-from .manager import ConnectionManager
+from app import crud, schemas
+from app.core.database import SessionLocal
+from app.services.manager import ConnectionManager
 
 
 active_ffmpeg_processes: Dict[int, subprocess.Popen] = {}

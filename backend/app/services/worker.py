@@ -27,7 +27,7 @@ async def worker():
             task_details["owner_id"],
         )
         try:
-            from .ffmpeg_runner import run_ffmpeg_process
+            from app.services.ffmpeg_runner import run_ffmpeg_process
 
             await run_ffmpeg_process(
                 task_id=task_details["task_id"],

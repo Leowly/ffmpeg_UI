@@ -12,14 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException
 import logging
 from sqlalchemy.orm import Session
 
-from ..crud import crud
-from ..models import models
-from ..schemas import schemas
-from ..core.deps import get_current_user, get_db
-from ..services.processing import manager
-from ..services.worker import global_queue
-from ..services.hw_accel import detect_hardware_encoder
-from ..core.config import reconstruct_file_path
+from app.crud import crud
+from app.models import models
+from app.schemas import schemas
+from app.core.deps import get_current_user, get_db
+from app.services.processing import manager
+from app.services.worker import global_queue
+from app.services.hw_accel import detect_hardware_encoder
+from app.core.config import reconstruct_file_path
 
 logger = logging.getLogger(__name__)
 

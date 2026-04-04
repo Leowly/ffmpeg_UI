@@ -5,9 +5,9 @@ from typing import cast
 from sqlalchemy.orm import Session
 import os
 import time
-from .. import models, schemas
-from ..core.security import get_password_hash
-from ..core.config import invalidate_file_path_cache
+from app import models, schemas
+from app.core.security import get_password_hash
+from app.core.config import invalidate_file_path_cache
 
 
 def get_user_by_username(db: Session, username: str):

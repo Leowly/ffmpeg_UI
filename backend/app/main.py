@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -27,26 +28,18 @@ if sys.platform == "win32":
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from . import models, crud
-from .core import config
-from .core.database import engine, SessionLocal
-from .core.config import UPLOAD_DIRECTORY
-from .core.limiter import limiter
-from .api import users, files, tasks
-from .services.processing import manager, worker
-from .services.hw_accel import detect_hardware_encoder
+from app import models, crud
+from app.core import config
+from app.core.database import engine, SessionLocal
+from app.core.config import UPLOAD_DIRECTORY
+from app.core.limiter import limiter
+from app.api import users, files, tasks
+from app.services.processing import manager, worker
+from app.services.hw_accel import detect_hardware_encoder
 
 # 只在非测试模式下创建表
 if os.environ.get("PYTEST_RUNNING") != "1":
     models.Base.metadata.create_all(bind=engine)
-
-app = FastAPI(
-    title="FFmpeg UI Backend",
-    description="API for handling user authentication and FFmpeg processing tasks.",
-    version="1.0.0",
-)
-
-app.state.limiter = limiter
 
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
@@ -55,23 +48,9 @@ origins = [origin.strip() for origin in cors_origins_str.split(",") if origin]
 if not origins:
     origins = ["http://localhost", "http://localhost:5173"]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
-)
 
-
-app.include_router(users.router)  # 用户路由通常在根路径，如 /token, /users/
-app.include_router(files.router, prefix="/api")
-app.include_router(tasks.router, prefix="/api")
-
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     def warmup_hw_detection():
         hw_type = detect_hardware_encoder()
         if hw_type:
@@ -84,7 +63,6 @@ async def startup_event():
     # Clean up stale tasks that were left in processing/pending state due to server restart
     db = SessionLocal()
     try:
-        # 查找所有正在进行但因重启而中断的任务
         stale_tasks = (
             db.query(models.ProcessingTask)
             .filter(models.ProcessingTask.status.in_(["processing", "pending"]))
@@ -103,6 +81,34 @@ async def startup_event():
 
     asyncio.create_task(worker())
     print(">>> Background worker started.")
+
+    yield
+
+    print(">>> Shutting down...")
+
+
+app = FastAPI(
+    title="FFmpeg UI Backend",
+    description="API for handling user authentication and FFmpeg processing tasks.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.state.limiter = limiter
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+)
+
+
+app.include_router(users.router)  # 用户路由通常在根路径，如 /token, /users/
+app.include_router(files.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
 
 
 @app.websocket("/ws/progress/{task_id}")
@@ -141,11 +147,11 @@ def start(host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None)
         reload: Override reload setting from config if provided
     """
     import uvicorn
-    from .core.config import RELOAD as config_reload
+    from app.core.config import RELOAD as config_reload
 
     use_reload = reload if reload is not None else config_reload
     uvicorn.run(
-        "backend.app.main:app",
+        "app.main:app",
         host=host,
         port=port,
         reload=use_reload,

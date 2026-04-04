@@ -4,9 +4,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .. import crud, models, schemas
-from ..core.deps import get_current_user, get_db
-from ..services.processing import terminate_task_process
+from app import crud, models, schemas
+from app.core.deps import get_current_user, get_db
+from app.services.processing import terminate_task_process
 
 router = APIRouter(
     tags=["Tasks"],

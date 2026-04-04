@@ -7,12 +7,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from ..crud import crud
-from ..models import models
-from ..schemas import schemas
-from ..core import security
-from ..core.deps import get_db, get_current_user
-from ..core.limiter import limiter
+from app.crud import crud
+from app.models import models
+from app.schemas import schemas
+from app.core import security
+from app.core.deps import get_db, get_current_user
+from app.core.limiter import limiter
 
 router = APIRouter()
 

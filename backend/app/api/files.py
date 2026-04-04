@@ -3,7 +3,7 @@
 
 from fastapi import APIRouter
 
-from . import upload, download, process, capabilities, delete
+from app.api import upload, download, process, capabilities, delete
 
 router = APIRouter(
     tags=["Files"],

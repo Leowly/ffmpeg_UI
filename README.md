@@ -37,8 +37,9 @@
 
 ```
 .
-├── backend/app/     # Python FastAPI 后端应用（包含唯一入口 main.py）
-└── frontend/        # Vue 3 Vite 前端应用
+├── backend/
+│   └── app/     # Python FastAPI 后端应用（包含唯一入口 main.py）
+└── frontend/    # Vue 3 Vite 前端应用
 ```
 
 ### 目录职责
@@ -51,11 +52,11 @@
 ### 启动方式
 
 ```bash
-# 使用 uv 运行（推荐）
-uv run --project backend -m backend.app.main
+# 从 backend/ 目录运行（推荐）
+cd backend && uv run python -m app.main
 
-# 或使用 uv 运行 uvicorn
-uv run --project backend -m uvicorn backend.app.main:app --reload
+# 或使用 uv 运行
+cd backend && uv run -m uvicorn app.main:app --reload
 ```
 
 ## 📦 生产构建

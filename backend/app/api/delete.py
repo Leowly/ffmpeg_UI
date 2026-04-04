@@ -4,10 +4,10 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..crud import crud
-from ..models import models
-from ..core.deps import get_current_user, get_db
-from ..core.config import reconstruct_file_path
+from app.crud import crud
+from app.models import models
+from app.core.deps import get_current_user, get_db
+from app.core.config import reconstruct_file_path
 
 router = APIRouter(
     tags=["Files"],

@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # 获取项目根目录
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 ENV_PATH = BASE_DIR / ".env"
 
 # 加载环境变量
@@ -20,7 +20,7 @@ ENABLE_HW_ACCEL_DETECTION = (
 # 是否启用热重载 (默认 False)
 RELOAD = os.environ.get("RELOAD", "false").lower() == "true"
 
-UPLOAD_DIRECTORY = "./backend/workspaces"
+UPLOAD_DIRECTORY = BASE_DIR / "workspaces"
 
 
 # --- 新增：文件大小解析逻辑 ---

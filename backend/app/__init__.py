@@ -1,6 +1,11 @@
 # backend/app/__init__.py
-from . import models
-from . import crud
-from . import main
+from pathlib import Path
+from dotenv import load_dotenv
 
-__all__ = ["models", "crud", "main"]
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
+
+from app import models
+from app import crud
+
+__all__ = ["models", "crud"]

@@ -6,10 +6,10 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from .. import models as models_module
-from .. import crud as crud_module
-from . import security
-from .database import SessionLocal
+from app import models as models_module
+from app import crud as crud_module
+from app.core import security
+from app.core.database import SessionLocal
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
@@ -30,11 +30,11 @@ async def get_token_from_header_or_cookie(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header[7:]
-    
+
     cookie_token = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
-        
+
     return ""
 
 
