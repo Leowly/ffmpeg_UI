@@ -144,17 +144,11 @@ def start(host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None)
 
     use_reload = reload if reload is not None else config_reload
 
-    reload_excludes = None
-    if use_reload:
-        data_dir = str(BASE_DIR / "data")
-        reload_excludes = [data_dir]
-
     uvicorn.run(
         "app.main:app",
         host=host,
         port=port,
         reload=use_reload,
-        reload_excludes=reload_excludes,
     )
 
 
