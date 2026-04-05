@@ -149,8 +149,6 @@ async def run_ffmpeg_process(
 ):
     db = SessionLocal()
     logger = logging.getLogger("ffmpeg_runner")
-    if not logger.handlers:
-        logging.basicConfig(level=logging.INFO)
 
     try:
         logger.info(

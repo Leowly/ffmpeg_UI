@@ -14,10 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv(env_path)
 
-# 配置日志
+# 配置日志 - 与 uvicorn/FastAPI 格式保持一致
 logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format="%(levelname)s:     %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from app import models
 from app.core.database import engine, SessionLocal
-from app.core.config import UPLOAD_DIRECTORY
+from app.core.config import UPLOAD_DIRECTORY, BASE_DIR
 from app.core.limiter import limiter
 from app.api import users, files, tasks
 from app.services import manager, worker
@@ -87,8 +87,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Shutting down...")
-
 
 app = FastAPI(
     title="FFmpeg UI Backend",
@@ -141,23 +139,22 @@ async def serve_spa(full_path: str):
 
 
 def start(host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None):
-    """
-    Start the FastAPI backend server.
-
-    Args:
-        host: Server host address
-        port: Server port
-        reload: Override reload setting from config if provided
-    """
     import uvicorn
     from app.core.config import RELOAD as config_reload
 
     use_reload = reload if reload is not None else config_reload
+
+    reload_excludes = None
+    if use_reload:
+        data_dir = str(BASE_DIR / "data")
+        reload_excludes = [data_dir]
+
     uvicorn.run(
         "app.main:app",
         host=host,
         port=port,
         reload=use_reload,
+        reload_excludes=reload_excludes,
     )
 
 
