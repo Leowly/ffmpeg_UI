@@ -53,9 +53,9 @@ async def lifespan(app: FastAPI):
     def warmup_hw_detection():
         hw_type = detect_hardware_encoder()
         if hw_type:
-            print(f">>> Hardware acceleration detected: {hw_type.upper()}")
+            logger.info("Hardware acceleration detected: %s", hw_type.upper())
         else:
-            print(">>> No hardware acceleration detected, using CPU encoding.")
+            logger.info("No hardware acceleration detected, using CPU encoding.")
 
     threading.Thread(target=warmup_hw_detection, daemon=True).start()
 
@@ -69,23 +69,25 @@ async def lifespan(app: FastAPI):
         )
 
         for task in stale_tasks:
-            print(f"Marking stale task {task.id} as failed due to server restart.")
+            logger.warning(
+                "Marking stale task %s as failed due to server restart.", task.id
+            )
             task.status = "failed"
             task.details = "Server restarted while task was pending/processing."
         db.commit()
     except Exception as e:
-        print(f"Error cleaning up stale tasks: {e}")
+        logger.error("Error cleaning up stale tasks: %s", e)
     finally:
         db.close()
 
     max_concurrent_workers = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
     for i in range(max_concurrent_workers):
         asyncio.create_task(worker(worker_id=i + 1))
-    print(f">>> {max_concurrent_workers} background worker(s) started.")
+    logger.info("%s background worker(s) started.", max_concurrent_workers)
 
     yield
 
-    print(">>> Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(

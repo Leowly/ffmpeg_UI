@@ -131,7 +131,7 @@ def run_ffmpeg_blocking(
 def terminate_task_process(task_id: int) -> bool:
     if task_id in active_ffmpeg_processes:
         proc = active_ffmpeg_processes[task_id]
-        print(f"Terminating FFmpeg process for task {task_id}")
+        logger.info("Terminating FFmpeg process for task %s", task_id)
         proc.kill()
         return True
     return False

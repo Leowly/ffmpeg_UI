@@ -1,9 +1,12 @@
 # backend/config.py
+import logging
 import os
 import re
 from functools import lru_cache
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -43,8 +46,8 @@ def parse_size_to_bytes(size_str: str | int | None) -> int:
     # 正则匹配 数字 + 单位
     match = re.match(r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$", s)
     if not match:
-        print(
-            f"Warning: Invalid MAX_UPLOAD_SIZE format '{size_str}', defaulting to 2GB."
+        logger.warning(
+            "Invalid MAX_UPLOAD_SIZE format '%s', defaulting to 2GB.", size_str
         )
         return 2 * 1024 * 1024 * 1024
 

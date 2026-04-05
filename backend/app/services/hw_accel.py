@@ -1,6 +1,7 @@
 # 硬件加速检测模块
 
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -8,6 +9,8 @@ import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -405,82 +408,84 @@ def get_ffmpeg_hwaccels() -> list[str]:
 
 
 def print_full_report():
-    print("=" * 60)
-    print("FFmpeg 硬件加速检测报告")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("FFmpeg 硬件加速检测报告")
+    logger.info("=" * 60)
 
-    print("\n[1] 系统检测到的 GPU 硬件...")
+    logger.info("\n[1] 系统检测到的 GPU 硬件...")
     gpus = detect_gpus()
     if gpus:
         for gpu in gpus:
-            print(f"    [{gpu.vendor.upper()}] {gpu.name}")
+            logger.info("    [%s] %s", gpu.vendor.upper(), gpu.name)
     else:
-        print("    未检测到 GPU")
+        logger.info("    未检测到 GPU")
 
-    print("\n[2] FFmpeg 版本...")
+    logger.info("\n[2] FFmpeg 版本...")
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
             capture_output=True,
             text=True,
         )
-        print(f"    {result.stdout.split(chr(10))[0]}")
+        logger.info("    %s", result.stdout.split(chr(10))[0])
     except FileNotFoundError:
-        print("    错误: FFmpeg 未安装或不在 PATH 中")
+        logger.error("    错误: FFmpeg 未安装或不在 PATH 中")
         return
     except Exception as e:
-        print(f"    错误: {e}")
+        logger.error("    错误: %s", e)
         return
 
-    print("\n[3] FFmpeg 编译支持的硬件加速方法...")
+    logger.info("\n[3] FFmpeg 编译支持的硬件加速方法...")
     hwaccels = get_ffmpeg_hwaccels()
     if hwaccels:
         for hw in hwaccels:
-            print(f"    - {hw}")
+            logger.info("    - %s", hw)
     else:
-        print("    无")
+        logger.info("    无")
 
-    print("\n[4] 硬件编码器检测结果...")
+    logger.info("\n[4] 硬件编码器检测结果...")
     hw_info = detect_hardware_info()
     if hw_info.isAvailable and hw_info.vendor:
-        print(f"    检测到可用硬件: {hw_info.vendor.upper()}")
-        print(f"    GPU 型号: {hw_info.gpu_name}")
-        print(f"    H.264 编码器: {hw_info.h264_encoder}")
-        print(f"    HEVC 编码器: {hw_info.hevc_encoder}")
-        print(f"    AV1 编码器: {hw_info.av1_encoder}")
+        logger.info("    检测到可用硬件: %s", hw_info.vendor.upper())
+        logger.info("    GPU 型号: %s", hw_info.gpu_name)
+        logger.info("    H.264 编码器: %s", hw_info.h264_encoder)
+        logger.info("    HEVC 编码器: %s", hw_info.hevc_encoder)
+        logger.info("    AV1 编码器: %s", hw_info.av1_encoder)
     else:
-        print("    无可用硬件编码器，将使用 CPU 软编码")
+        logger.info("    无可用硬件编码器，将使用 CPU 软编码")
 
-    print("\n[5] 推荐配置...")
+    logger.info("\n[5] 推荐配置...")
     if hw_info.isAvailable and hw_info.vendor:
-        print(f"    推荐使用: {hw_info.vendor.upper()} 硬件加速")
+        logger.info("    推荐使用: %s 硬件加速", hw_info.vendor.upper())
         if hw_info.h264_encoder:
-            print(f"    H.264 编码: -c:v {hw_info.h264_encoder}")
+            logger.info("    H.264 编码: -c:v %s", hw_info.h264_encoder)
         if hw_info.hevc_encoder:
-            print(f"    HEVC 编码: -c:v {hw_info.hevc_encoder}")
+            logger.info("    HEVC 编码: -c:v %s", hw_info.hevc_encoder)
         if hw_info.hwaccel_flag:
-            print(f"    解码加速: -hwaccel {hw_info.hwaccel_flag}")
+            logger.info("    解码加速: -hwaccel %s", hw_info.hwaccel_flag)
             if hw_info.hwaccel_output_format:
-                print(
-                    f"    输出格式: -hwaccel_output_format {hw_info.hwaccel_output_format}"
+                logger.info(
+                    "    输出格式: -hwaccel_output_format %s",
+                    hw_info.hwaccel_output_format,
                 )
     else:
-        print("    无可用硬件加速，将使用 CPU 软编码")
-        print("    推荐编码器: libx264 (H.264) / libx265 (HEVC)")
+        logger.info("    无可用硬件加速，将使用 CPU 软编码")
+        logger.info("    推荐编码器: libx264 (H.264) / libx265 (HEVC)")
 
-    print("\n" + "=" * 60)
-    print("\n[6] 前端 API 返回参数...")
-    print(json.dumps(hw_info.to_api_response(), indent=2, ensure_ascii=False))
-    print("\n" + "=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("\n[6] 前端 API 返回参数...")
+    logger.info(json.dumps(hw_info.to_api_response(), indent=2, ensure_ascii=False))
+    logger.info("\n" + "=" * 60)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     enable_detection = (
         os.environ.get("ENABLE_HARDWARE_ACCELERATION_DETECTION", "true").lower()
         == "true"
     )
 
     if not enable_detection:
-        print("硬件加速检测已通过环境变量禁用")
+        logger.info("硬件加速检测已通过环境变量禁用")
     else:
         print_full_report()
