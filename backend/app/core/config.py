@@ -146,7 +146,7 @@ def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
         return normalized_path
 
     # 尝试相对于项目根目录
-    candidate = BASE_DIR / normalized_path
+    candidate = BASE_DIR.parent / normalized_path
     if candidate.exists():
         return str(candidate)
 

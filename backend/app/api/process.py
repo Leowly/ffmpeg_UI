@@ -13,6 +13,7 @@ from app.crud import crud
 from app.models import models
 from app.schemas import schemas
 from app.core.deps import get_current_user, get_db
+from app.core.config import reconstruct_file_path
 from app.services import manager, enqueue_task
 from app.services.hw_accel import detect_hardware_encoder
 
@@ -234,7 +235,9 @@ async def process_files(
         if not db_file or db_file.owner_id != current_user.id:
             continue
 
-        input_path = os.path.normpath(db_file.filepath)
+        input_path = os.path.normpath(
+            reconstruct_file_path(db_file.filepath, current_user.id) or db_file.filepath
+        )
         original_filename_base, _ = os.path.splitext(db_file.filename)
         final_display_name = f"{original_filename_base}_processed.{payload.container}"
         final_disk_filename = f"{uuid.uuid4()}.{payload.container}"
