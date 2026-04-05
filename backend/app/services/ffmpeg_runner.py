@@ -15,7 +15,7 @@ from app import crud, schemas
 from app.core.database import SessionLocal
 from app.services.manager import ConnectionManager
 
-
+logger = logging.getLogger(__name__)
 active_ffmpeg_processes: Dict[int, subprocess.Popen] = {}
 
 
