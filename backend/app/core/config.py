@@ -23,7 +23,7 @@ ENABLE_HW_ACCEL_DETECTION = (
 # 是否启用热重载 (默认 False)
 RELOAD = os.environ.get("RELOAD", "false").lower() == "true"
 
-UPLOAD_DIRECTORY = BASE_DIR / "data" / "workspaces"
+UPLOAD_DIRECTORY = BASE_DIR.parent / "data" / "workspaces"
 
 
 # --- 新增：文件大小解析逻辑 ---
