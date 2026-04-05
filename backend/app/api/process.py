@@ -13,8 +13,7 @@ from app.crud import crud
 from app.models import models
 from app.schemas import schemas
 from app.core.deps import get_current_user, get_db
-from app.services.processing import manager
-from app.services.worker import enqueue_task
+from app.services import manager, enqueue_task
 from app.services.hw_accel import detect_hardware_encoder
 
 logger = logging.getLogger(__name__)

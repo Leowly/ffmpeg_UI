@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
 from app.core.deps import get_current_user, get_db
-from app.services.processing import terminate_task_process
+from app.services import terminate_task_process
 
 router = APIRouter(
     tags=["Tasks"],

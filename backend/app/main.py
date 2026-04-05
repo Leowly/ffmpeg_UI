@@ -33,8 +33,7 @@ from app.core.database import engine, SessionLocal
 from app.core.config import UPLOAD_DIRECTORY
 from app.core.limiter import limiter
 from app.api import users, files, tasks
-from app.services.processing import manager
-from app.services.worker import worker
+from app.services import manager, worker
 from app.services.hw_accel import detect_hardware_encoder
 
 # 只在非测试模式下创建表
