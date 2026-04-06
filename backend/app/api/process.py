@@ -48,8 +48,8 @@ async def process_files(
             reconstruct_file_path(str(db_file.filepath), current_user.id)
             or db_file.filepath
         )
-        original_filename_base = input_path.stem
-        final_display_name = f"{original_filename_base}_processed.{payload.container}"
+        original_filename = Path(db_file.filename).stem
+        final_display_name = f"{original_filename}_processed.{payload.container}"
         final_disk_filename = f"{uuid.uuid4()}.{payload.container}"
         final_output_path = input_path.parent / final_disk_filename
         temp_output_filename = f"{uuid.uuid4()}.{payload.container}"
