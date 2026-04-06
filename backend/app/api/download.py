@@ -3,7 +3,8 @@
 import asyncio
 import json
 import os
-from typing import List, Tuple
+from pathlib import Path
+from typing import List
 
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,46 +13,20 @@ from sqlalchemy.orm import Session
 
 from app.crud import crud
 from app.models import models
-from app.schemas import schemas
+from app.schemas.system import FileInfoResponse
+from app.schemas.file import FileResponseForFrontend, FileResponseInner
 from app.core.deps import get_current_user, get_db
 from app.core.config import reconstruct_file_path
 from app.core.security import create_download_token, verify_download_token
 from app.core.database import SessionLocal
+from app.services.ffprobe_runner import run_ffprobe_sync
 
 router = APIRouter(
     tags=["Files"],
 )
 
 
-def run_ffprobe_sync(path: str) -> Tuple[int, str, str]:
-    """同步运行 ffprobe 获取文件信息"""
-    import subprocess
-
-    command = [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        "-show_streams",
-        path,
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            errors="ignore",
-            check=False,
-            creationflags=0,
-        )
-        return result.returncode, result.stdout, result.stderr
-    except FileNotFoundError:
-        raise
-
-
-@router.get("/file-info", response_model=schemas.FileInfoResponse)
+@router.get("/file-info", response_model=FileInfoResponse)
 async def get_file_info(
     filename: str,
     current_user: models.User = Depends(get_current_user),
@@ -68,7 +43,7 @@ async def get_file_info(
 
     file_path = db_file.filepath
     resolved = await asyncio.get_running_loop().run_in_executor(
-        None, reconstruct_file_path, file_path, current_user.id
+        None, reconstruct_file_path, str(file_path), current_user.id
     )
     if not resolved:
         raise HTTPException(status_code=404, detail="File not found on server")
@@ -91,7 +66,7 @@ async def get_file_info(
             )
 
         try:
-            clean_data = schemas.FileInfoResponse.model_validate(raw_data)
+            clean_data = FileInfoResponse.model_validate(raw_data)
             return clean_data
         except Exception as e:
             import logging
@@ -112,11 +87,11 @@ async def get_file_info(
         )
 
 
-@router.get("/files", response_model=List[schemas.FileResponseForFrontend])
+@router.get("/files", response_model=List[FileResponseForFrontend])
 async def read_user_files(
     current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    db_files = crud.get_user_files(db, user_id=current_user.id)
+    db_files = crud.get_user_files(db, user_id=int(current_user.id))
     response_files = []
     loop = asyncio.get_running_loop()
 
@@ -124,30 +99,33 @@ async def read_user_files(
         current_file_path = db_file.filepath
         resolved_file_path = None
 
-        exists = await loop.run_in_executor(None, os.path.exists, current_file_path)
+        exists = await loop.run_in_executor(None, Path(current_file_path).exists)
         if exists:
             resolved_file_path = current_file_path
         else:
             resolved_candidate = await loop.run_in_executor(
-                None, reconstruct_file_path, current_file_path, current_user.id
+                None,
+                reconstruct_file_path,
+                str(current_file_path),
+                int(current_user.id),
             )
             if resolved_candidate:
                 resolved_file_path = resolved_candidate
 
         if resolved_file_path:
             file_size = await loop.run_in_executor(
-                None, os.path.getsize, resolved_file_path
+                None, lambda p=resolved_file_path: Path(p).stat().st_size
             )
             response_files.append(
-                schemas.FileResponseForFrontend(
+                FileResponseForFrontend(
                     uid=str(db_file.id),
                     id=str(db_file.id),
-                    name=db_file.filename,
-                    status=db_file.status,
+                    name=str(db_file.filename),
+                    status=str(db_file.status),
                     size=file_size,
-                    response=schemas.FileResponseInner(
+                    response=FileResponseInner(
                         file_id=str(db_file.id),
-                        original_name=db_file.filename,
+                        original_name=str(db_file.filename),
                         temp_path=resolved_file_path,
                     ),
                 )
@@ -175,7 +153,7 @@ async def download_file(
     file_path = db_file.filepath
     loop = asyncio.get_running_loop()
     resolved = await loop.run_in_executor(
-        None, reconstruct_file_path, file_path, current_user.id
+        None, reconstruct_file_path, str(file_path), current_user.id
     )
     if resolved:
         file_path = resolved
@@ -226,7 +204,6 @@ async def temp_download(
     token: str,
     db: Session = Depends(get_db),
 ):
-    """临时下载端点（验证签名，无需认证）"""
     payload = verify_download_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired download link")
@@ -241,14 +218,16 @@ async def temp_download(
     file_path = db_file.filepath
     loop = asyncio.get_running_loop()
     resolved = await loop.run_in_executor(
-        None, reconstruct_file_path, file_path, user_id
+        None, reconstruct_file_path, str(file_path), user_id
     )
     if resolved:
         file_path = resolved
     else:
         raise HTTPException(status_code=404, detail="File not found on server")
 
-    file_size = await loop.run_in_executor(None, os.path.getsize, file_path)
+    file_size = await loop.run_in_executor(
+        None, lambda p=file_path: Path(p).stat().st_size
+    )
 
     async def file_iterator(path: str, chunk_size: int = 1024 * 1024):
         async with aiofiles.open(path, "rb") as f:

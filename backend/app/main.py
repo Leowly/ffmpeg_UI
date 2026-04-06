@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from app import models
 from app.core.database import engine, SessionLocal
-from app.core.config import UPLOAD_DIRECTORY, BASE_DIR
+from app.core.config import UPLOAD_DIRECTORY
 from app.core.limiter import limiter
 from app.api import users, files, tasks
 from app.services import manager, worker

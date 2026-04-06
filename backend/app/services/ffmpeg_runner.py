@@ -7,12 +7,14 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
 from typing import Dict, Tuple
 
-from app import crud, schemas
-from app.core.database import SessionLocal
+from app import crud
+from app.schemas.file import FileCreate
+from app.core.database import get_db_session
 from app.services.manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -147,81 +149,86 @@ async def run_ffmpeg_process(
     final_output_path: str = "",
     final_display_name: str = "",
 ):
-    db = SessionLocal()
     logger = logging.getLogger("ffmpeg_runner")
 
-    try:
-        logger.info(
-            f"run_ffmpeg_process: start task_id={task_id}, command={display_command}"
-        )
-        crud.update_task(db, task_id=task_id, status="processing")
+    with get_db_session() as db:
+        try:
+            logger.info(
+                f"run_ffmpeg_process: start task_id={task_id}, command={display_command}"
+            )
+            crud.update_task(db, task_id=task_id, status="processing")
 
-        loop = asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
 
-        success, full_stderr = await loop.run_in_executor(
-            None,
-            run_ffmpeg_blocking,
-            command_args,
-            task_id,
-            total_duration,
-            loop,
-            conn_manager,
-        )
+            success, full_stderr = await loop.run_in_executor(
+                None,
+                run_ffmpeg_blocking,
+                command_args,
+                task_id,
+                total_duration,
+                loop,
+                conn_manager,
+            )
 
-        if success:
-            logger.info(f"Task {task_id} completed successfully.")
-            try:
-                if os.path.exists(final_output_path):
-                    os.remove(final_output_path)
-                os.replace(temp_output_path, final_output_path)
+            if success:
+                logger.info(f"Task {task_id} completed successfully.")
+                try:
+                    if Path(final_output_path).exists():
+                        Path(final_output_path).unlink()
+                    Path(temp_output_path).replace(final_output_path)
 
-                task = crud.get_task(db, task_id)
-                new_db_file = None
-                if task:
-                    new_file_schema = schemas.FileCreate(
-                        filename=final_display_name
-                        or os.path.basename(final_output_path),
-                        filepath=final_output_path,
-                        status="processed",
+                    task = crud.get_task(db, task_id)
+                    new_db_file = None
+                    if task:
+                        new_file_schema = FileCreate(
+                            filename=final_display_name or Path(final_output_path).name,
+                            filepath=final_output_path,
+                            status="processed",
+                        )
+                        new_db_file = crud.create_user_file(
+                            db=db, file=new_file_schema, user_id=int(task.owner_id)
+                        )
+
+                    crud.update_task(
+                        db,
+                        task_id=task_id,
+                        status="completed",
+                        details=full_stderr,
+                        result_file_id=new_db_file.id if new_db_file else None,
                     )
-                    new_db_file = crud.create_user_file(
-                        db=db, file=new_file_schema, user_id=task.owner_id
+                    await conn_manager.send_progress(task_id, 100, "completed")
+                    logger.info(f"Task {task_id} post-processing finished.")
+
+                except Exception as e:
+                    error_msg = f"Post-processing failed: {e!r}"
+                    logger.error(error_msg, exc_info=True)
+                    crud.update_task(
+                        db, task_id=task_id, status="failed", details=error_msg
                     )
-
+                    await conn_manager.send_progress(task_id, 100, "failed")
+            else:
+                logger.error(f"Task {task_id} failed. Stderr: {full_stderr}")
                 crud.update_task(
-                    db,
-                    task_id=task_id,
-                    status="completed",
-                    details=full_stderr,
-                    result_file_id=new_db_file.id if new_db_file else None,
-                )
-                await conn_manager.send_progress(task_id, 100, "completed")
-                logger.info(f"Task {task_id} post-processing finished.")
-
-            except Exception as e:
-                error_msg = f"Post-processing failed: {e!r}"
-                logger.error(error_msg, exc_info=True)
-                crud.update_task(
-                    db, task_id=task_id, status="failed", details=error_msg
+                    db, task_id=task_id, status="failed", details=full_stderr
                 )
                 await conn_manager.send_progress(task_id, 100, "failed")
-        else:
-            logger.error(f"Task {task_id} failed. Stderr: {full_stderr}")
-            crud.update_task(db, task_id=task_id, status="failed", details=full_stderr)
-            await conn_manager.send_progress(task_id, 100, "failed")
 
-    except Exception as e:
-        logger.error(
-            f"Exception in async wrapper for task {task_id}: {e!r}", exc_info=True
-        )
-        crud.update_task(db, task_id=task_id, status="failed", details=str(e))
-    finally:
-        if os.path.exists(temp_output_path) and temp_output_path != final_output_path:
-            try:
-                os.remove(temp_output_path)
-                logger.info(f"Cleaned up temporary file: {temp_output_path}")
-            except OSError as e:
-                logger.error(f"Failed to remove temporary file {temp_output_path}: {e}")
+        except Exception as e:
+            logger.error(
+                f"Exception in async wrapper for task {task_id}: {e!r}", exc_info=True
+            )
+            crud.update_task(db, task_id=task_id, status="failed", details=str(e))
+        finally:
+            if (
+                Path(temp_output_path).exists()
+                and temp_output_path != final_output_path
+            ):
+                try:
+                    Path(temp_output_path).unlink()
+                    logger.info(f"Cleaned up temporary file: {temp_output_path}")
+                except OSError as e:
+                    logger.error(
+                        f"Failed to remove temporary file {temp_output_path}: {e}"
+                    )
 
-        conn_manager.disconnect(task_id)
-        db.close()
+            conn_manager.disconnect(task_id)

@@ -138,20 +138,16 @@ FILE_SIGNATURES = {
 
 @lru_cache(maxsize=128)
 def reconstruct_file_path(stored_path: str, user_id: int) -> str | None:
-    # 处理 Windows 反斜杠
     normalized_path = stored_path.replace("\\", "/")
 
-    # 尝试直接使用存储的路径
-    if os.path.exists(normalized_path):
+    if Path(normalized_path).exists():
         return normalized_path
 
-    # 尝试相对于项目根目录
-    candidate = BASE_DIR.parent / normalized_path
+    candidate = BASE_DIR / normalized_path
     if candidate.exists():
         return str(candidate)
 
-    # 尝试在用户目录下查找
-    filename = os.path.basename(normalized_path)
+    filename = Path(normalized_path).name
     user_candidate = UPLOAD_DIRECTORY / str(user_id) / filename
     if user_candidate.exists():
         return str(user_candidate)

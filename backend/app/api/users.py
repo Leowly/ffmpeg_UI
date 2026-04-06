@@ -9,7 +9,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.crud import crud
 from app.models import models
-from app.schemas import schemas
+from app.schemas.user import UserCreate, User
+from app.schemas.system import APIResponse
+from app.schemas.user import Token
 from app.core import security
 from app.core.deps import get_db, get_current_user
 from app.core.limiter import limiter
@@ -17,9 +19,7 @@ from app.core.limiter import limiter
 router = APIRouter()
 
 
-@router.post(
-    "/token", response_model=schemas.APIResponse[schemas.Token], tags=["Users"]
-)
+@router.post("/token", response_model=APIResponse[Token], tags=["Users"])
 @limiter.limit("5/minute")
 def login_for_access_token(
     request: Request,
@@ -29,7 +29,6 @@ def login_for_access_token(
     try:
         user = crud.get_user_by_username(db, username=form_data.username)
 
-        # 防范时序攻击
         hashed_password = (
             user.hashed_password
             if user
@@ -40,17 +39,15 @@ def login_for_access_token(
         )
 
         if not user or not is_password_correct:
-            error_response = schemas.APIResponse(
-                success=False, message="用户名或密码不正确。"
-            )
+            error_response = APIResponse(success=False, message="用户名或密码不正确。")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content=error_response.model_dump(),
             )
 
         access_token = security.create_access_token(data={"sub": user.username})
-        token_data = schemas.Token(access_token=access_token, token_type="bearer")
-        success_response = schemas.APIResponse[schemas.Token](
+        token_data = Token(access_token=access_token, token_type="bearer")
+        success_response = APIResponse[Token](
             success=True, data=token_data, message="登录成功！"
         )
         response = JSONResponse(
@@ -66,7 +63,7 @@ def login_for_access_token(
         return response
 
     except SQLAlchemyError:
-        error_response = schemas.APIResponse(
+        error_response = APIResponse(
             success=False, message="数据库连接失败，请稍后再试。"
         )
         return JSONResponse(
@@ -74,24 +71,22 @@ def login_for_access_token(
             content=error_response.model_dump(),
         )
     except Exception:
-        error_response = schemas.APIResponse(
-            success=False, message="服务器发生未知错误。"
-        )
+        error_response = APIResponse(success=False, message="服务器发生未知错误。")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=error_response.model_dump(),
         )
 
 
-@router.post("/users/", response_model=schemas.User, tags=["Users"])
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+@router.post("/users/", response_model=User, tags=["Users"])
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_username(db, username=user.username)
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     return crud.create_user(db=db, user=user)
 
 
-@router.get("/users/me", response_model=schemas.User, tags=["Users"])
+@router.get("/users/me", response_model=User, tags=["Users"])
 def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 

@@ -7,5 +7,6 @@ load_dotenv(env_path)
 
 from app import models
 from app import crud
+from app import schemas
 
-__all__ = ["models", "crud"]
+__all__ = ["models", "crud", "schemas"]
