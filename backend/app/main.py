@@ -27,18 +27,19 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from app import models
+from fastapi.responses import FileResponse, JSONResponse
+from app.models.models import Base, ProcessingTask
 from app.core.database import engine, SessionLocal
 from app.core.config import UPLOAD_DIRECTORY
 from app.core.limiter import limiter
+from app.core.exceptions import ResourceNotFoundError, FileProcessingError
 from app.api import users, files, tasks
 from app.services import manager, worker
 from app.services.hw_accel import detect_hardware_encoder
 
 # 只在非测试模式下创建表
 if os.environ.get("PYTEST_RUNNING") != "1":
-    models.Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
 
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
 
@@ -63,8 +64,8 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         stale_tasks = (
-            db.query(models.ProcessingTask)
-            .filter(models.ProcessingTask.status.in_(["processing", "pending"]))
+            db.query(ProcessingTask)
+            .filter(ProcessingTask.status.in_(["processing", "pending"]))
             .all()
         )
 
@@ -105,6 +106,22 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+
+
+@app.exception_handler(ResourceNotFoundError)
+async def resource_not_found_handler(request, exc: ResourceNotFoundError):
+    return JSONResponse(
+        status_code=404,
+        content={"success": False, "message": exc.detail, "data": None},
+    )
+
+
+@app.exception_handler(FileProcessingError)
+async def file_processing_error_handler(request, exc: FileProcessingError):
+    return JSONResponse(
+        status_code=400,
+        content={"success": False, "message": exc.detail, "data": None},
+    )
 
 
 app.include_router(users.router)  # 用户路由通常在根路径，如 /token, /users/

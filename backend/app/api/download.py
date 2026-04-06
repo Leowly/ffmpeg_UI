@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import List
 
@@ -12,14 +11,19 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.crud import crud
-from app.models import models
+from app.models.models import User
 from app.schemas.system import FileInfoResponse
 from app.schemas.file import FileResponseForFrontend, FileResponseInner
-from app.core.deps import get_current_user, get_db
-from app.core.config import reconstruct_file_path
+from app.core.deps import (
+    get_current_user,
+    get_db,
+    get_valid_file_for_user,
+    reconstruct_file_path_async,
+)
 from app.core.security import create_download_token, verify_download_token
 from app.core.database import SessionLocal
 from app.services.ffprobe_runner import run_ffprobe_sync
+from app.core.exceptions import ResourceNotFoundError
 
 router = APIRouter(
     tags=["Files"],
@@ -29,7 +33,7 @@ router = APIRouter(
 @router.get("/file-info", response_model=FileInfoResponse)
 async def get_file_info(
     filename: str,
-    current_user: models.User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     try:
@@ -37,17 +41,12 @@ async def get_file_info(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid file ID format")
 
-    db_file = crud.get_file_by_id(db, file_id=file_id)
-    if not db_file or db_file.owner_id != current_user.id:
+    try:
+        db_file, file_path = await get_valid_file_for_user(
+            file_id, int(current_user.id), db
+        )
+    except ResourceNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
-
-    file_path = db_file.filepath
-    resolved = await asyncio.get_running_loop().run_in_executor(
-        None, reconstruct_file_path, str(file_path), current_user.id
-    )
-    if not resolved:
-        raise HTTPException(status_code=404, detail="File not found on server")
-    file_path = resolved
 
     try:
         loop = asyncio.get_running_loop()
@@ -89,7 +88,7 @@ async def get_file_info(
 
 @router.get("/files", response_model=List[FileResponseForFrontend])
 async def read_user_files(
-    current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     db_files = crud.get_user_files(db, user_id=int(current_user.id))
     response_files = []
@@ -103,11 +102,8 @@ async def read_user_files(
         if exists:
             resolved_file_path = current_file_path
         else:
-            resolved_candidate = await loop.run_in_executor(
-                None,
-                reconstruct_file_path,
-                str(current_file_path),
-                int(current_user.id),
+            resolved_candidate = await reconstruct_file_path_async(
+                str(current_file_path), int(current_user.id)
             )
             if resolved_candidate:
                 resolved_file_path = resolved_candidate
@@ -138,7 +134,7 @@ async def read_user_files(
 async def download_file(
     file_id: str,
     token: str | None = None,
-    current_user: models.User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     try:
@@ -146,19 +142,12 @@ async def download_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid file ID")
 
-    db_file = crud.get_file_by_id(db, file_id=file_id_int)
-    if not db_file or db_file.owner_id != current_user.id:
+    try:
+        db_file, file_path = await get_valid_file_for_user(
+            file_id_int, int(current_user.id), db
+        )
+    except ResourceNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
-
-    file_path = db_file.filepath
-    loop = asyncio.get_running_loop()
-    resolved = await loop.run_in_executor(
-        None, reconstruct_file_path, str(file_path), current_user.id
-    )
-    if resolved:
-        file_path = resolved
-    else:
-        raise HTTPException(status_code=404, detail="File not found on server")
 
     async def file_iterator(path: str, chunk_size: int = 1024 * 1024):
         async with aiofiles.open(path, "rb") as f:
@@ -177,7 +166,7 @@ async def download_file(
 @router.get("/download-temp/{file_id}")
 async def get_temp_download_link(
     file_id: str,
-    current_user: models.User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
     try:
@@ -211,21 +200,12 @@ async def temp_download(
     file_id = payload.get("file_id")
     user_id = payload.get("user_id")
 
-    db_file = crud.get_file_by_id(db, file_id=file_id)
-    if not db_file or db_file.owner_id != user_id:
+    try:
+        db_file, file_path = await get_valid_file_for_user(file_id, user_id, db)
+    except ResourceNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = db_file.filepath
-    loop = asyncio.get_running_loop()
-    resolved = await loop.run_in_executor(
-        None, reconstruct_file_path, str(file_path), user_id
-    )
-    if resolved:
-        file_path = resolved
-    else:
-        raise HTTPException(status_code=404, detail="File not found on server")
-
-    file_size = await loop.run_in_executor(
+    file_size = await asyncio.get_running_loop().run_in_executor(
         None, lambda p=file_path: Path(p).stat().st_size
     )
 

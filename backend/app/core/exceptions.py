@@ -2,8 +2,12 @@
 
 
 class FileProcessingError(Exception):
-    pass
+    def __init__(self, detail: str = ""):
+        self.detail = detail
+        super().__init__(detail)
 
 
 class ResourceNotFoundError(Exception):
-    pass
+    def __init__(self, detail: str = ""):
+        self.detail = detail
+        super().__init__(detail)

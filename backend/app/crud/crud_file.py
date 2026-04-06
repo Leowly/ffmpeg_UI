@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import cast
 from sqlalchemy.orm import Session
-from app import models
+from app.models.models import File, ProcessingTask
 from app.schemas.file import FileCreate
 from app.core.config import invalidate_file_path_cache
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_user_file(db: Session, file: FileCreate, user_id: int):
-    db_file = models.File(**file.model_dump(), owner_id=user_id)
+    db_file = File(**file.model_dump(), owner_id=user_id)
     db.add(db_file)
     db.commit()
     db.refresh(db_file)
@@ -21,20 +21,16 @@ def create_user_file(db: Session, file: FileCreate, user_id: int):
 
 def get_user_files(db: Session, user_id: int, skip: int = 0, limit: int = 100):
     return (
-        db.query(models.File)
-        .filter(models.File.owner_id == user_id)
-        .offset(skip)
-        .limit(limit)
-        .all()
+        db.query(File).filter(File.owner_id == user_id).offset(skip).limit(limit).all()
     )
 
 
 def get_file_by_id(db: Session, file_id: int):
-    return db.query(models.File).filter(models.File.id == file_id).first()
+    return db.query(File).filter(File.id == file_id).first()
 
 
 def update_file_status(db: Session, file_id: int, new_status: str):
-    db_file = db.query(models.File).filter(models.File.id == file_id).first()
+    db_file = db.query(File).filter(File.id == file_id).first()
     if db_file:
         db_file.status = cast(str, new_status)
         db.commit()
@@ -43,14 +39,14 @@ def update_file_status(db: Session, file_id: int, new_status: str):
 
 
 def delete_file(db: Session, file_id: int, file_path: str | None = None):
-    db_file = db.query(models.File).filter(models.File.id == file_id).first()
+    db_file = db.query(File).filter(File.id == file_id).first()
     if not db_file:
         return None
     running_tasks = (
-        db.query(models.ProcessingTask)
+        db.query(ProcessingTask)
         .filter(
-            models.ProcessingTask.source_filename == db_file.filename,
-            models.ProcessingTask.status.in_(["processing", "queued"]),
+            ProcessingTask.source_filename == db_file.filename,
+            ProcessingTask.status.in_(["processing", "queued"]),
         )
         .count()
     )
@@ -63,11 +59,11 @@ def delete_file(db: Session, file_id: int, file_path: str | None = None):
     filename = db_file.filename
     path_to_delete = file_path or db_file.filepath
     try:
-        db.query(models.ProcessingTask).filter(
-            models.ProcessingTask.result_file_id == file_id
+        db.query(ProcessingTask).filter(
+            ProcessingTask.result_file_id == file_id
         ).delete(synchronize_session=False)
-        db.query(models.ProcessingTask).filter(
-            models.ProcessingTask.source_filename == filename
+        db.query(ProcessingTask).filter(
+            ProcessingTask.source_filename == filename
         ).delete(synchronize_session=False)
         db.delete(db_file)
         db.commit()
