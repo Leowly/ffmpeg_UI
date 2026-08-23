@@ -1,9 +1,11 @@
 import asyncio
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
+from app.core.deps import get_current_user
 from app.models import models
 from app.schemas import schemas
-from app.core.deps import get_current_user
 from app.services.hw_accel import detect_hardware_encoder
 
 router = APIRouter(
@@ -17,7 +19,7 @@ DEBUG_HW_TYPE: str | None = (
 
 @router.get("/capabilities", response_model=schemas.SystemCapabilities)
 async def get_system_capabilities(
-    current_user: models.User = Depends(get_current_user),
+    current_user: Annotated[models.User, Depends(get_current_user)],
 ):
     if DEBUG_HW_TYPE is not None:
         hw_type = DEBUG_HW_TYPE if DEBUG_HW_TYPE != "cpu" else None

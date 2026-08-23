@@ -1,12 +1,12 @@
 # backend/app/main.py
 
-import os
-import sys
 import asyncio
 import logging
+import os
+import sys
 import threading
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -28,12 +28,14 @@ if sys.platform == "win32":
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from app.models.models import Base, ProcessingTask
-from app.core.database import engine, SessionLocal
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.api import files, tasks, users
 from app.core.config import UPLOAD_DIRECTORY
+from app.core.database import SessionLocal, engine
+from app.core.exceptions import FileProcessingError, ResourceNotFoundError
 from app.core.limiter import limiter
-from app.core.exceptions import ResourceNotFoundError, FileProcessingError
-from app.api import users, files, tasks
+from app.models.models import Base, ProcessingTask
 from app.services import manager, worker
 from app.services.hw_accel import detect_hardware_encoder
 
@@ -76,7 +78,7 @@ async def lifespan(app: FastAPI):
             task.status = "failed"
             task.details = "Server restarted while task was pending/processing."
         db.commit()
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error("Error cleaning up stale tasks: %s", e)
     finally:
         db.close()
@@ -157,6 +159,7 @@ async def serve_spa(full_path: str):
 
 def start(host: str = "127.0.0.1", port: int = 8000, reload: bool | None = None):
     import uvicorn
+
     from app.core.config import RELOAD as config_reload
 
     use_reload = reload if reload is not None else config_reload
